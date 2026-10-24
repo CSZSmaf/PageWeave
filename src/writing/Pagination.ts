@@ -60,12 +60,22 @@ function paginate(view:EditorView,layout:PaperLayout){
   document.body.append(mirror);
   const origin=mirror.getBoundingClientRect().top,units:Unit[]=[];
   try{
+    const measureList=(element:HTMLElement,node:PMNode,pos:number)=>{
+      let index=0;const children=Array.from(element.children).filter(child=>!child.classList.contains('flow-page-gap'));
+      node.forEach((child,offset)=>{
+        const dom=children[index++] as HTMLElement|undefined;if(!dom)return;
+        const start=pos+1+offset;
+        if(child.isTextblock)units.push(...textLines(dom,child,start).map((unit,line)=>({...unit,pos:node.type.name==='listItem'&&index===1&&line===0?pos:unit.pos,top:unit.top-origin,bottom:unit.bottom-origin})));
+        else measureList(dom,child,start);
+      });
+    };
     for(const {element,node,pos}of entries){
       if(node.type.name==='pageBreak'){const rect=element.getBoundingClientRect();units.push({pos,top:rect.top-origin,bottom:rect.bottom-origin,manual:true});}
       else if(node.type.name==='table'){
         const rows=element instanceof HTMLTableElement?element.rows:element.querySelector('table')?.rows;let index=0;
         node.forEach((row,offset)=>{const actual=rows?.[index];if(actual){const rect=actual.getBoundingClientRect();units.push({pos:index===0?pos:pos+1+offset,top:rect.top-origin,bottom:rect.bottom-origin,...(index?{columns:row.childCount}:{})});}index++;});
       }
+      else if(node.type.name==='bulletList'||node.type.name==='orderedList')measureList(element,node,pos);
       else if(node.isTextblock)units.push(...textLines(element,node,pos).map(unit=>({...unit,top:unit.top-origin,bottom:unit.bottom-origin})));
       else{const rect=element.getBoundingClientRect();units.push({pos,top:rect.top-origin,bottom:rect.bottom-origin});}
     }

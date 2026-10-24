@@ -31,9 +31,18 @@ function serializeInline(node:RichNode):string{
   if(style){const family=FONTS.includes(style.fontFamily)?style.fontFamily:'';const size=style.fontSize?num(style.fontSize,12,6,96):'';const color=/^#[a-f\d]{6}$/i.test(style.color??'')?style.color.slice(1):'';result=`\\MogaoText{${family}}{${size}}{${color}}{${result}}`;}
   return result;
 }
-export function serializeRich(doc:RichNode):string{
+export function serializeRich(doc:RichNode,listDepth=0):string{
   if(doc.type!=='doc')throw new Error('无效的写作内容。');
   return (doc.content??[]).map(node=>{
+    if(node.type==='bulletList'||node.type==='orderedList'){
+      if(listDepth>=4)throw new Error('列表最多支持四级缩进。');
+      if(!node.content?.length)throw new Error('列表不能为空。');
+      const items=node.content.map(item=>{
+        if(item.type!=='listItem'||item.content?.[0]?.type!=='paragraph'||item.content.some(n=>!['paragraph','bulletList','orderedList'].includes(n.type)))throw new Error('列表项支持正文和嵌套列表。');
+        return `\\PageWeaveItem{${serializeRich({type:'doc',content:item.content},listDepth+1)}}`;
+      }).join('\n');
+      return `\\PageWeaveList{${node.type==='orderedList'?'ordered':'bullet'}}{${Math.floor(num(node.attrs?.start,1,1,999999))}}{\n${items}\n}`;
+    }
     if(node.type==='flowImage')return `\\MogaoImage{${imagePath(node.attrs?.src)}}{${num(node.attrs?.width,75,10,100)/100}}{${['left','center','right'].includes(node.attrs?.textAlign)?node.attrs!.textAlign:'center'}}{${num(node.attrs?.naturalWidth,800,1,16000)}}{${num(node.attrs?.naturalHeight,600,1,16000)}}`;
     if(node.type==='table'){
       const rows=node.content??[],cols=rows[0]?.content?.length??0;
@@ -78,15 +87,30 @@ function inline(source:string,marks:RichNode['marks']=[]):RichNode[]{
   }
   flush();return nodes;
 }
-export function parseRich(source:string):RichNode{
+export function parseRich(source:string,listDepth=0):RichNode{
   const content:RichNode[]=[];let i=0;
   while(i<source.length){
     if(/\s/.test(source[i])){i++;continue;}if(source[i]==='%'){const e=source.indexOf('\n',i);i=e<0?source.length:e+1;continue;}
-    const m=/^\\(MogaoPara|MogaoHeading|MogaoEquation|MogaoImage|MogaoTable|newpage)\b/.exec(source.slice(i));if(!m)throw new Error('写作区包含未适配的 LaTeX 结构');i+=m[0].length;
+    const m=/^\\(MogaoPara|MogaoHeading|MogaoEquation|MogaoImage|MogaoTable|PageWeaveList|newpage)\b/.exec(source.slice(i));if(!m)throw new Error('写作区包含未适配的 LaTeX 结构');i+=m[0].length;
     if(m[1]==='newpage'){content.push({type:'pageBreak'});continue;}
-    const args=[];const count=m[1]==='MogaoImage'?5:m[1]==='MogaoTable'?2:m[1]==='MogaoPara'||m[1]==='MogaoHeading'?3:1;
+    const args=[];const count=m[1]==='MogaoImage'?5:m[1]==='MogaoTable'?2:['MogaoPara','MogaoHeading','PageWeaveList'].includes(m[1])?3:1;
     for(let n=0;n<count;n++){const g=readGroup(source,i);if(!g)throw new Error('写作结构参数未闭合');args.push(g.text);i=g.to;}
-    if(m[1]==='MogaoImage')content.push({type:'flowImage',attrs:{src:imagePath(args[0]),width:Number(args[1])*100,textAlign:args[2],naturalWidth:Number(args[3]),naturalHeight:Number(args[4])}});
+    if(m[1]==='PageWeaveList'){
+      if(listDepth>=4||!['bullet','ordered'].includes(args[0])||!/^\d+$/.test(args[1])||Number(args[1])<1||Number(args[1])>999999)throw new Error('列表参数无效。');
+      const items:RichNode[]=[];let at=0;
+      while(at<args[2].length){
+        if(/\s/.test(args[2][at])){at++;continue;}
+        if(args[2][at]==='%'){const end=args[2].indexOf('\n',at);at=end<0?args[2].length:end+1;continue;}
+        if(!args[2].startsWith('\\PageWeaveItem',at))throw new Error('未知列表项结构。');
+        const group=readGroup(args[2],at+'\\PageWeaveItem'.length);if(!group)throw new Error('列表项未闭合。');at=group.to;
+        const body=parseRich(group.text,listDepth+1).content!;
+        if(body[0]?.type!=='paragraph'||body.some(n=>!['paragraph','bulletList','orderedList'].includes(n.type)))throw new Error('列表项包含未适配结构。');
+        items.push({type:'listItem',content:body});
+      }
+      if(!items.length)throw new Error('列表不能为空。');
+      content.push({type:args[0]==='ordered'?'orderedList':'bulletList',...(args[0]==='ordered'?{attrs:{start:Number(args[1])}}:{}),content:items});
+    }
+    else if(m[1]==='MogaoImage')content.push({type:'flowImage',attrs:{src:imagePath(args[0]),width:Number(args[1])*100,textAlign:args[2],naturalWidth:Number(args[3]),naturalHeight:Number(args[4])}});
     else if(m[1]==='MogaoTable'){
       const rows:RichNode[]=[];let at=0;const body=args[1];
       while(at<body.length){

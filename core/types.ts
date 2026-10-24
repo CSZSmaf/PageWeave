@@ -45,6 +45,7 @@ export interface WorkbenchApi {
   undo(version: number): Promise<ProjectState>;
   redo(version: number): Promise<ProjectState>;
   save(): Promise<ProjectState>;
+  saveAs(): Promise<ProjectState|null>;
   reload(): Promise<ProjectState | null>;
   configure(main: string, engine: Engine): Promise<ProjectState>;
   compile(): Promise<CompileResult>;

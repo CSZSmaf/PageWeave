@@ -18,6 +18,7 @@ const api: WorkbenchApi = {
   undo: version => ipcRenderer.invoke('project:undo', version),
   redo: version => ipcRenderer.invoke('project:redo', version),
   save: () => ipcRenderer.invoke('project:save'),
+  saveAs: () => ipcRenderer.invoke('project:save-as'),
   reload: () => ipcRenderer.invoke('project:reload'),
   configure: (main, engine) => ipcRenderer.invoke('project:configure', main, engine),
   compile: () => ipcRenderer.invoke('build:compile'),

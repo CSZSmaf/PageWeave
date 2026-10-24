@@ -23,7 +23,7 @@ const textOf=(node:RichNode):string=>node.text??(node.attrs?.latex?String(node.a
 export default function WritingApp(){
   const [project,setProject]=useState<ProjectState|null>(null),[seed,setSeed]=useState<RichNode|null>(null),[preview,setPreview]=useState<CompileResult|null>(null),[last,setLast]=useState<CompileResult|null>(null);
   const [view,setView]=useState<'write'|'pdf'|'source'>('write'),[busy,setBusy]=useState(false),[pending,setPending]=useState(false),[pages,setPages]=useState(1),[pdfPages,setPdfPages]=useState(0),[zoom,setZoom]=useState(.95);
-  const [navVisible,setNavVisible]=useState(false),[formulasVisible,setFormulasVisible]=useState(false),[math,setMath]=useState<MathRequest|null>(null),[exports,setExports]=useState(false),[log,setLog]=useState(false),[message,setMessage]=useState(''),[error,setError]=useState(false),[,setTick]=useState(0);
+  const [navVisible,setNavVisible]=useState(false),[formulasVisible,setFormulasVisible]=useState(false),[math,setMath]=useState<MathRequest|null>(null),[exports,setExports]=useState(false),[saveMenu,setSaveMenu]=useState(false),[log,setLog]=useState(false),[message,setMessage]=useState(''),[error,setError]=useState(false),[,setTick]=useState(0);
   const [ribbonTab,setRibbonTab]=useState<RibbonTab>('home'),[sourceFile,setSourceFile]=useState('main.tex'),[bodyEpoch,setBodyEpoch]=useState(0),[wordDialog,setWordDialog]=useState(false),[switching,setSwitching]=useState(false);
   const [searchRequest,setSearchRequest]=useState<SearchRequest|null>(null),[writingSearch,setWritingSearch]=useState<SearchController|null>(null),[sourceSearch,setSourceSearch]=useState<SearchController|null>(null);
   const searchTarget=view==='source'?sourceSearch:view==='write'?writingSearch:null;
@@ -49,7 +49,13 @@ export default function WritingApp(){
   useEffect(()=>{if(message&&!error){const timer=setTimeout(()=>setMessage(''),4000);return()=>clearTimeout(timer);}},[message,error]);
   const capture=()=>{const e=editor.current;if(currentView.current!=='source'&&e&&!e.isDestroyed)session.current?.change(e.getJSON() as RichNode);};
   const save=()=>run(async()=>{capture();await session.current?.mutate(()=>api.save());notify('文稿已保存。');});
+  const saveAs=()=>run(async()=>{if(switchingView.current)return;switchingView.current=true;setSwitching(true);try{capture();await session.current?.idle();const next=await api.saveAs();if(next){load(next);notify('文稿已另存。');}}finally{switchingView.current=false;setSwitching(false);}});
+  useEffect(()=>{if(!saveMenu&&!exports)return;const dismiss=(event:PointerEvent)=>{if(!(event.target as HTMLElement).closest('.export-wrap')){setSaveMenu(false);setExports(false);}};const escape=(event:KeyboardEvent)=>{if(event.key==='Escape'){setSaveMenu(false);setExports(false);}};window.addEventListener('pointerdown',dismiss);window.addEventListener('keydown',escape);return()=>{window.removeEventListener('pointerdown',dismiss);window.removeEventListener('keydown',escape);};},[saveMenu,exports]);
   useEffect(()=>api.onCloseRequest(()=>void run(async()=>{capture();await session.current?.idle();await api.finishClose();})),[]);
+  useEffect(()=>{const key=(event:KeyboardEvent)=>{
+    if(event.isComposing||!(event.ctrlKey||event.metaKey)||!event.shiftKey||event.altKey||event.key.toLowerCase()!=='s'||math||wordDialog||layout||tableDialog)return;
+    event.preventDefault();event.stopPropagation();void saveAs();
+  };window.addEventListener('keydown',key,true);return()=>window.removeEventListener('keydown',key,true);});
   useEffect(()=>{const key=(event:KeyboardEvent)=>{
     if(event.key==='Escape'&&!event.isComposing&&searchRequest&&!math&&!wordDialog&&!layout&&!tableDialog){event.preventDefault();event.stopPropagation();setSearchRequest(null);searchTarget?.focus();return;}
     if(event.isComposing||!(event.ctrlKey||event.metaKey)||event.altKey||view==='pdf'||math||wordDialog||layout||tableDialog)return;
@@ -57,7 +63,7 @@ export default function WritingApp(){
   };window.addEventListener('keydown',key,true);return()=>window.removeEventListener('keydown',key,true);});
   useEffect(()=>{const key=(event:KeyboardEvent)=>{
     if(event.defaultPrevented||!(event.ctrlKey||event.metaKey))return;
-    if(event.key.toLowerCase()==='s'){event.preventDefault();void save();}
+    if(event.key.toLowerCase()==='s'){event.preventDefault();if(event.shiftKey)void saveAs();else void save();}
     if(currentView.current==='source')return;
     if(event.target instanceof HTMLInputElement||event.target instanceof HTMLTextAreaElement||event.target instanceof HTMLSelectElement)return;
     if(!editor.current?.isFocused&&['z','y'].includes(event.key.toLowerCase())&&!math){event.preventDefault();history(event.key.toLowerCase()==='y'||event.shiftKey?'redo':'undo');}
@@ -130,13 +136,13 @@ export default function WritingApp(){
   const selected=e?.state.selection.$from.parent.attrs.sourceId,dirty=pending||project?.files.some(f=>f.dirty);
   return <div className="writer-shell" data-project-version={project?.version} data-preview-version={preview?.version} data-pending={pending}>
     <header className="writer-header">
-      <div className="brand"><div className="brand-mark">墨</div><span>墨稿</span></div>
+      <div className="brand"><div className="brand-mark"><FileText size={20}/></div><span>PageWeave</span></div>
       <div className="writer-docname" title={project?.root}><strong>{documentName}</strong>{dirty&&<i className="document-dirty" title="未保存"/>}</div>
       {view!=='source'&&<nav className="ribbon-tabs" role="tablist" aria-label="功能区">{([['home','开始'],['insert','插入'],['layout','布局'],...(context?[[context,context==='image'?'图片':'表格']]:[])] as [RibbonTab,string][]).map(([tab,label])=><button key={tab} role="tab" aria-selected={ribbonTab===tab} className={ribbonTab===tab?'on':''} onMouseDown={ev=>ev.preventDefault()} onClick={()=>setRibbonTab(tab)}>{label}</button>)}</nav>}
       <div className="writer-header-actions">
         <button className="quiet-button" disabled={busy||switching} onClick={()=>void switchProject('open')}><FolderOpen size={15}/>打开</button><button className="quiet-button" disabled={busy||switching} onClick={()=>void switchProject('newDocument')}><FilePlus2 size={15}/>新建</button>
-        <button className="quiet-button" onClick={()=>void save()}><Save size={15}/>保存</button>
-        <div className="export-wrap"><button className="primary-button" onClick={()=>setExports(!exports)}><ArrowDownToLine size={15}/>导出<ChevronDown size={12}/></button>{exports&&<div className="dropdown">
+        <div className="export-wrap save-split"><button className="quiet-button" disabled={switching} onClick={()=>void save()}><Save size={15}/>保存</button><button className="quiet-button save-options" aria-label="更多保存选项" aria-expanded={saveMenu} onClick={()=>{setExports(false);setSaveMenu(!saveMenu);}}><ChevronDown size={12}/></button>{saveMenu&&<div className="dropdown"><button onClick={()=>{setSaveMenu(false);void saveAs();}}>另存为<span className="menu-shortcut">Ctrl+Shift+S</span></button></div>}</div>
+        <div className="export-wrap"><button className="primary-button" onClick={()=>{setSaveMenu(false);setExports(!exports);}}><ArrowDownToLine size={15}/>导出<ChevronDown size={12}/></button>{exports&&<div className="dropdown">
           <button onClick={()=>{setExports(false);void run(async()=>{capture();const result=await session.current!.latest();const p=await api.exportPdf(result.token);if(p)notify('PDF 已导出：'+p);});}}>导出正式 PDF</button>
           <button onClick={()=>{setExports(false);void run(async()=>{capture();await session.current?.flush();const p=await api.exportProject();if(p)notify('LaTeX 工程已导出：'+p);});}}>导出 LaTeX 工程</button>
         </div>}</div>
@@ -153,9 +159,9 @@ export default function WritingApp(){
     <input ref={imageInput} type="file" accept="image/png,image/jpeg,image/webp" aria-label="图片文件" hidden onChange={ev=>{const file=ev.target.files?.[0];ev.target.value='';if(file)void importImage(file);}}/>
     <div className="writer-workspace">{navVisible&&view!=='source'&&<aside className="writer-navigation"><div className="writer-nav-title"><span>文档结构</span></div><div className="writer-block-list">{liveBlocks().map((b,i)=><button key={b.id} className={selected===b.id?'active':''} onClick={()=>begin(b.id)}><span className="block-symbol">{b.content.content?.[0]?.type==='heading'?<Heading size={14}/>:b.content.content?.[0]?.type==='displayMath'?<Sigma size={14}/>:String(i+1).padStart(2,'0')}</span><span>{textOf(b.content).slice(0,34)||'空白段落'}</span></button>)}</div><div className="writer-nav-bottom"><button onClick={()=>void switchProject('writingDemo')} disabled={busy}><FileText size={14}/>入门教程</button><button onClick={()=>void run(()=>api.reveal())}><FolderOpen size={14}/>打开工程文件夹<ArrowUpRight size={12}/></button></div></aside>}
       <main className="writer-main">
-        {view==='source'&&<section className="source-workspace">{activeSource?.content!==null&&activeSource?.content!==undefined?<SourceEditor key={project?.id} file={sourceFile} text={session.current?.sourceText(sourceFile)??''} readOnly={!activeSource.editable} onChange={text=>{session.current?.changeSource(sourceFile,text);tick();}} onCursor={()=>{}} onUndo={()=>void sourceHistory('undo')} onRedo={()=>void sourceHistory('redo')} onSave={()=>void save()} onCompile={()=>void compileSource()} onSearchReady={setSourceSearch} onSearchBoundary={async()=>{await session.current?.flush();}}/>:<div className="source-resource"><FileText size={34}/><span>{sourceFile}</span><button className="outline-button" onClick={()=>void run(()=>api.reveal())}>打开工程文件夹</button></div>}</section>}
+        {view==='source'&&<section className="source-workspace">{activeSource?.content!==null&&activeSource?.content!==undefined?<SourceEditor key={project?.id} file={sourceFile} text={session.current?.sourceText(sourceFile)??''} readOnly={!activeSource.editable||switching} onChange={text=>{session.current?.changeSource(sourceFile,text);tick();}} onCursor={()=>{}} onUndo={()=>void sourceHistory('undo')} onRedo={()=>void sourceHistory('redo')} onSave={()=>void save()} onCompile={()=>void compileSource()} onSearchReady={setSourceSearch} onSearchBoundary={async()=>{await session.current?.flush();}}/>:<div className="source-resource"><FileText size={34}/><span>{sourceFile}</span><button className="outline-button" onClick={()=>void run(()=>api.reveal())}>打开工程文件夹</button></div>}</section>}
 
-        {supported&&seed&&project&&<div className="writer-view" hidden={view!=='write'}><FlowEditor key={project.id+':'+bodyEpoch} content={seed} layout={paperLayout(project)} zoom={zoom} onReady={value=>{editor.current=value;tick();}} onChange={doc=>{if(currentView.current!=='source')session.current?.change(doc);tick();}} onSelection={tick} onPages={setPages} onMath={setMath} onSearchReady={setWritingSearch}/></div>}
+        {supported&&seed&&project&&<div className="writer-view" hidden={view!=='write'}><FlowEditor key={project.id+':'+bodyEpoch} content={seed} layout={paperLayout(project)} zoom={zoom} readOnly={switching} onReady={value=>{editor.current=value;tick();}} onChange={doc=>{if(currentView.current!=='source')session.current?.change(doc);tick();}} onSelection={tick} onPages={setPages} onMath={setMath} onSearchReady={setWritingSearch}/></div>}
         {view==='pdf'&&<div className="writer-view">{project&&!supported&&<div className="flow-unavailable"><span>当前工程的正文需要在源码视图中编辑。</span><button className="outline-button" onClick={()=>void changeView('source')}>查看源码</button></div>}<WritingPdf result={preview} blocks={supported?project?.writing??[]:[]} active={null} selected={null} zoom={zoom} onSelect={()=>{}} onEdit={begin} onReady={()=>{}} onChange={()=>{}} onFinish={()=>{}} onMath={setMath} onError={msg=>notify(msg,true)} onPages={setPdfPages}/></div>}
         {log&&<div className="writer-log"><div><strong>排版日志</strong><button aria-label="关闭排版日志" onClick={()=>setLog(false)}><X size={16}/></button></div><pre>{last?.log??'尚无日志'}</pre></div>}
       </main>

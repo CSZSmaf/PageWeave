@@ -12,18 +12,19 @@ import {BlockSpacing,mathNode,PageBreak,type MathRequest} from './RichEditor';
 import {pagination,PAGE_GAP} from './Pagination';
 import {WritingSearch,writingSearch} from '../search/WritingSearch';
 import type {SearchController} from '../search/SearchController';
+import {WritingListItem,ListKeys} from './Lists';
 
-interface Props{content:RichNode;layout:PaperLayout;zoom:number;onReady(editor:Editor|null):void;onChange(doc:RichNode):void;onSelection():void;onPages(pages:number):void;onMath(request:MathRequest):void;onSearchReady(search:SearchController|null):void}
-const SourceId=Extension.create({name:'writingSourceId',addGlobalAttributes(){return [{types:['paragraph','heading','displayMath','pageBreak','flowImage','table'],attributes:{sourceId:{default:null,parseHTML:element=>element.getAttribute('data-block'),renderHTML:attrs=>attrs.sourceId?{'data-block':attrs.sourceId}:{}}}}];}});
+interface Props{content:RichNode;layout:PaperLayout;zoom:number;readOnly?:boolean;onReady(editor:Editor|null):void;onChange(doc:RichNode):void;onSelection():void;onPages(pages:number):void;onMath(request:MathRequest):void;onSearchReady(search:SearchController|null):void}
+const SourceId=Extension.create({name:'writingSourceId',addGlobalAttributes(){return [{types:['paragraph','heading','displayMath','pageBreak','flowImage','table','bulletList','orderedList'],attributes:{sourceId:{default:null,parseHTML:element=>element.getAttribute('data-block'),renderHTML:attrs=>attrs.sourceId?{'data-block':attrs.sourceId}:{}}}}];}});
 
 export default function FlowEditor(props:Props){
   const ref=useRef(props);ref.current=props;
   const [pages,setPages]=useState(1),compositionPending=useRef(false);
   const editor=useEditor({
-    extensions:[StarterKit.configure({blockquote:false,bulletList:false,orderedList:false,listItem:false,code:false,codeBlock:false,horizontalRule:false,link:false,trailingNode:{node:'paragraph'},heading:{levels:[1,2,3]}}),TextStyleKit.configure({lineHeight:false,backgroundColor:false}),TextAlign.configure({types:['heading','paragraph','flowImage'],defaultAlignment:'justify'}),BlockSpacing,SourceId,mathNode(false,r=>ref.current.onMath(r)),mathNode(true,r=>ref.current.onMath(r)),PageBreak,FlowImage,Table.configure({resizable:false}),TableRow,TableCell.extend({content:'paragraph+'}),TableHeader.extend({content:'paragraph+'}),
+    extensions:[StarterKit.configure({blockquote:false,listItem:false,code:false,codeBlock:false,horizontalRule:false,link:false,trailingNode:{node:'paragraph'},heading:{levels:[1,2,3]}}),WritingListItem,ListKeys,TextStyleKit.configure({lineHeight:false,backgroundColor:false}),TextAlign.configure({types:['heading','paragraph','flowImage'],defaultAlignment:'justify'}),BlockSpacing,SourceId,mathNode(false,r=>ref.current.onMath(r)),mathNode(true,r=>ref.current.onMath(r)),PageBreak,FlowImage,Table.configure({resizable:false}),TableRow,TableCell.extend({content:'paragraph+'}),TableHeader.extend({content:'paragraph+'}),
       WritingSearch,pagination(()=>ref.current.layout,n=>{setPages(n);ref.current.onPages(n);}),
       Extension.create({name:'continuousWritingKeys',priority:1000,addKeyboardShortcuts(){return {
-        'Mod-Enter':()=>this.editor.isActive('table')||this.editor.commands.insertContent([{type:'pageBreak'},{type:'paragraph'}]),
+        'Mod-Enter':()=>this.editor.isActive('table')||this.editor.isActive('listItem')||this.editor.commands.insertContent([{type:'pageBreak'},{type:'paragraph'}]),
         'Mod-End':()=>this.editor.chain().setTextSelection(this.editor.state.doc.content.size-1).scrollIntoView().run(),
         'Mod-Home':()=>this.editor.chain().setTextSelection(1).scrollIntoView().run(),
       };}})],
@@ -35,6 +36,7 @@ export default function FlowEditor(props:Props){
     onSelectionUpdate:()=>ref.current.onSelection(),
   });
   useEffect(()=>{props.onReady(editor);return()=>props.onReady(null);},[editor]);
+  useEffect(()=>{editor?.setEditable(!props.readOnly);},[editor,props.readOnly]);
   useEffect(()=>{if(!editor)return;const search=writingSearch(editor),changed=()=>search.changed();ref.current.onSearchReady(search);editor.on('update',changed);return()=>{editor.off('update',changed);ref.current.onSearchReady(null);};},[editor]);
   useEffect(()=>{if(editor)editor.view.dispatch(editor.state.tr.setMeta('paperLayout',true).setMeta('addToHistory',false));},[props.layout.width,props.layout.height,props.layout.margin,editor]);
   const {width,height,margin}=props.layout,total=pages*(height+PAGE_GAP)-PAGE_GAP;

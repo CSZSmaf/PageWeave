@@ -1,7 +1,7 @@
-MoGao third-party notices
+PageWeave third-party notices
 
 The following license texts belong to third-party dependencies.
-They do not grant a license for MoGao application code.
+They do not grant a license for PageWeave application code.
 Electron and Chromium notices are also included in the Windows distribution.
 
 ========================================================================

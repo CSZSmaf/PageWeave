@@ -7,6 +7,7 @@ import type { Engine, ProjectState, ProjectFile } from './types';
 import { parseWriting, serializeRich, blockSource, type RichNode } from './writing';
 import {canFlow,type FlowPart} from './flow';
 import {WRITING_TOOLS_STYLE} from './writing-tools';
+import {LIST_STYLE,LIST_STYLE_FILE} from './lists';
 
 const sourceExtensions = new Set(['.tex', '.bib', '.sty', '.cls', '.txt', '.md', '.bst', '.cfg']);
 const excludedDirectories = new Set(['node_modules', '.git', '.tex-workbench', 'dist', 'dist-electron', 'release']);
@@ -104,7 +105,13 @@ export class Project {
     let text=source;
     // At an equal offset, replace/remove the old macro before inserting its predecessor.
     for(const edit of edits.sort((a,b)=>b.from-a.from||b.to-a.to))text=text.slice(0,edit.from)+edit.after+text.slice(edit.to);
-    let addTools=false;
+    let addTools=false,addLists=false;
+    if(parts.some(part=>/"type":"(?:bulletList|orderedList)"/.test(JSON.stringify(part.content)))){
+      const existing=this.files.get(LIST_STYLE_FILE);
+      if(existing&&this.history.texts.get(LIST_STYLE_FILE)!==LIST_STYLE)throw new Error('工程已有不同的列表样式文件，请先在源码视图中检查。');
+      addLists=!existing;
+      if(!/\\usepackage(?:\[[^\]]*\])?\{pageweave-lists\}/.test(text))text=text.replace('\\begin{document}','\\usepackage{pageweave-lists}\n\\begin{document}');
+    }
     if(parts.some(part=>['"type":"flowImage"','"type":"table"','"type":"textStyle"'].some(type=>JSON.stringify(part.content).includes(type)))){
       const tools=this.files.get('mogao-tools.sty');
       if(tools&&this.history.texts.get('mogao-tools.sty')!==WRITING_TOOLS_STYLE)throw new Error('工程已有不同的 mogao-tools.sty，请在源码视图中处理后再插入图片或表格。');
@@ -113,6 +120,7 @@ export class Project {
     }
     if(Buffer.byteLength(text)>5*1024*1024)throw new Error('单个源码文件不能超过 5 MB。');
     if(addTools)this.addFile('mogao-tools.sty',Buffer.from(WRITING_TOOLS_STYLE),'UTF-8',WRITING_TOOLS_STYLE);
+    if(addLists)this.addFile(LIST_STYLE_FILE,Buffer.from(LIST_STYLE),'UTF-8',LIST_STYLE);
     if(this.history.commit('连续写作',[minimalPatch(this.main,source,text)]))this.version++;
     return this.state();
   }
@@ -201,5 +209,16 @@ export class Project {
       const target = contained(destination, file); await fs.mkdir(path.dirname(target), { recursive: true }); await fs.writeFile(target, bytes);
     }
     return state;
+  }
+  async saveAs(destination:string){
+    const state=this.state(),contents=[...this.files.keys()].map(file=>[file,this.encode(file)] as const);
+    const parent=await fs.realpath(path.dirname(path.resolve(destination)));
+    const target=path.join(parent,path.basename(destination)),relative=path.relative(this.root,target);
+    if(!relative||(!relative.startsWith('..'+path.sep)&&relative!=='..'&&!path.isAbsolute(relative)))throw new Error('请选择当前工程以外的保存位置。');
+    // Create a fresh directory. Existing documents, including an empty directory,
+    // are never overwritten by Save As.
+    try{await fs.mkdir(target);}catch(error){if((error as NodeJS.ErrnoException).code==='EEXIST')throw new Error('这个位置已存在，请换一个名称。');throw error;}
+    for(const [file,bytes]of contents){const full=contained(target,file);await fs.mkdir(path.dirname(full),{recursive:true});await fs.writeFile(full,bytes,{flag:'wx'});}
+    const next=await Project.open(target);next.configure(state.main,state.engine);return next;
   }
 }

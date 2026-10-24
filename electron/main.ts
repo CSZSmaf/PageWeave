@@ -72,7 +72,7 @@ app.whenReady().then(async () => {
   handler('writing:demo',async()=>{if(!await confirmLeave())return null;project=await writingProject();await persist();return project.state();});
   handler('writing:new',async()=>{if(!await confirmLeave())return null;const choice=await dialog.showOpenDialog(window,{title:'选择新文稿的存放目录',properties:['openDirectory','createDirectory']});if(choice.canceled)return null;const destination=path.join(choice.filePaths[0],'新文稿-'+Date.now());const next=await writingProject(destination);const text=next.history.texts.get('main.tex')!;next.source('main.tex',text.replace(/\\begin\{document\}[\s\S]*\\end\{document\}/,'\\begin{document}\n\\MogaoBlock{start}{\n\\MogaoPara{justify}{1.5}{\\strut}\n}\n\\end{document}'),0);await next.save();project=await Project.open(destination);await persist();return project.state();});
   handler('writing:edit',(id,content,version)=>project.writeBlock(id,content,version));
-  handler('writing:flow',(parts,version)=>project.writeFlow(parts,version));
+  handler('writing:flow',(parts,version,document)=>project.writeFlow(parts,version,document));
   handler('writing:import-image',(bytes:Uint8Array,version:number)=>{
     if(!(bytes instanceof Uint8Array)||bytes.length>20*1024*1024)throw new Error('请选择 20 MB 以内的图片。');
     const image=nativeImage.createFromBuffer(Buffer.from(bytes));if(image.isEmpty())throw new Error('无法读取图片，请使用 PNG、JPEG 或 WebP。');

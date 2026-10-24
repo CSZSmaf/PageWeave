@@ -1,6 +1,13 @@
 import type {CompileResult,ProjectState,WorkbenchApi} from '../../core/types';
 import type {RichNode} from '../../core/writing';
 import {flowParts} from '../../core/flow';
+import {REVIEW_FILE} from '../../core/review';
+
+function sameRender(a:ProjectState,b:ProjectState){
+  if(a.id!==b.id||a.main!==b.main||a.engine!==b.engine)return false;
+  const files=a.files.filter(f=>f.path!==REVIEW_FILE),other=b.files.filter(f=>f.path!==REVIEW_FILE);
+  return files.length===other.length&&files.every((f,i)=>f.path===other[i].path&&f.content===other[i].content&&(f.content!==null||f.size===other[i].size));
+}
 
 interface Events{project(project:ProjectState):void;preview(result:CompileResult):void;busy(busy:boolean):void;pending(pending:boolean):void;error(error:unknown):void}
 /** Serial source updates and coalesced builds. Neither completion replaces editor state. */
@@ -21,27 +28,27 @@ export class LiveSession{
   change(doc:RichNode){this.pending=doc;this.scheduleWrite();}
   changeSource(file:string,text:string){this.sources.set(file,text);this.scheduleWrite();}
   sourceText(file:string){return this.sources.get(file)??this.project.files.find(f=>f.path===file)?.content??'';}
-  private accept(next:ProjectState){if(this.disposed)return;this.project=next;this.events.project(next);}
+  private accept(next:ProjectState){if(this.disposed)return;const unchanged=sameRender(this.project,next);this.project=next;this.events.project(next);if(unchanged&&this.preview&&this.preview.version!==next.version){this.preview={...this.preview,version:next.version};this.events.preview(this.preview);}}
   private async drain(){
     while((this.pending||this.sources.size)&&!this.disposed){
-      const before=this.project.version;
+      const before=this.project;
       if(this.pending){
         const doc=this.pending;this.pending=null;
-        try{this.accept(await this.api.writeFlow(flowParts(doc,this.fallback),this.project.version));}
+        try{this.accept(await this.api.writeFlow(flowParts(doc,this.fallback),this.project.version,doc));}
         catch(error){this.pending??=doc;throw error;}
       }else{
         const [file,text]=this.sources.entries().next().value!;
         this.accept(await this.api.source(file,text,this.project.version));
         if(this.sources.get(file)===text)this.sources.delete(file);
       }
-      if(this.project.version!==before)this.scheduleBuild();
+      if(!sameRender(before,this.project))this.scheduleBuild();
     }
     this.events.pending(!!this.pending||!!this.sources.size);
   }
   flush(){clearTimeout(this.writeTimer);clearTimeout(this.maxWriteTimer);this.maxWriteTimer=undefined;const task=this.queue.catch(()=>{}).then(()=>this.drain());this.queue=task;return task;}
   mutate(action:(project:ProjectState)=>Promise<ProjectState>){
     clearTimeout(this.writeTimer);clearTimeout(this.maxWriteTimer);this.maxWriteTimer=undefined;
-    const task=this.queue.catch(()=>{}).then(async()=>{await this.drain();const before=this.project.version;this.accept(await action(this.project));await this.drain();if(this.project.version!==before)this.scheduleBuild();});
+    const task=this.queue.catch(()=>{}).then(async()=>{await this.drain();const before=this.project;this.accept(await action(this.project));await this.drain();if(!sameRender(before,this.project))this.scheduleBuild();});
     this.queue=task;return task;
   }
   private scheduleBuild(){clearTimeout(this.buildTimer);this.buildTimer=setTimeout(()=>void this.build().catch(this.events.error),850);}
@@ -51,9 +58,9 @@ export class LiveSession{
     this.building=(async()=>{
       this.events.busy(true);
       try{while(this.requested&&!this.disposed){
-        this.requested=false;const result=await this.api.compile();
+        this.requested=false;const started=this.project;let result=await this.api.compile();
         if(this.disposed||result.projectId!==this.project.id)continue;
-        if(result.version!==this.project.version){this.requested=true;continue;}
+        if(result.version!==this.project.version){if(sameRender(started,this.project))result={...result,version:this.project.version};else{this.requested=true;continue;}}
         this.preview=result;this.events.preview(result);
       }}finally{this.building=null;if(!this.disposed)this.events.busy(false);}
     })();

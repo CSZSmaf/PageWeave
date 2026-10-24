@@ -13,8 +13,9 @@ import {pagination,PAGE_GAP} from './Pagination';
 import {WritingSearch,writingSearch} from '../search/WritingSearch';
 import type {SearchController} from '../search/SearchController';
 import {WritingListItem,ListKeys} from './Lists';
+import {Review} from './Review';
 
-interface Props{content:RichNode;layout:PaperLayout;zoom:number;readOnly?:boolean;onReady(editor:Editor|null):void;onChange(doc:RichNode):void;onSelection():void;onPages(pages:number):void;onMath(request:MathRequest):void;onSearchReady(search:SearchController|null):void}
+interface Props{content:RichNode;layout:PaperLayout;zoom:number;readOnly?:boolean;onReady(editor:Editor|null):void;onChange(doc:RichNode):void;onSelection():void;onPages(pages:number):void;onMath(request:MathRequest):void;onComment?(id:string):void;onSearchReady(search:SearchController|null):void}
 const SourceId=Extension.create({name:'writingSourceId',addGlobalAttributes(){return [{types:['paragraph','heading','displayMath','pageBreak','flowImage','table','bulletList','orderedList'],attributes:{sourceId:{default:null,parseHTML:element=>element.getAttribute('data-block'),renderHTML:attrs=>attrs.sourceId?{'data-block':attrs.sourceId}:{}}}}];}});
 
 export default function FlowEditor(props:Props){
@@ -22,7 +23,7 @@ export default function FlowEditor(props:Props){
   const [pages,setPages]=useState(1),compositionPending=useRef(false);
   const editor=useEditor({
     extensions:[StarterKit.configure({blockquote:false,listItem:false,code:false,codeBlock:false,horizontalRule:false,link:false,trailingNode:{node:'paragraph'},heading:{levels:[1,2,3]}}),WritingListItem,ListKeys,TextStyleKit.configure({lineHeight:false,backgroundColor:false}),TextAlign.configure({types:['heading','paragraph','flowImage'],defaultAlignment:'justify'}),BlockSpacing,SourceId,mathNode(false,r=>ref.current.onMath(r)),mathNode(true,r=>ref.current.onMath(r)),PageBreak,FlowImage,Table.configure({resizable:false}),TableRow,TableCell.extend({content:'paragraph+'}),TableHeader.extend({content:'paragraph+'}),
-      WritingSearch,pagination(()=>ref.current.layout,n=>{setPages(n);ref.current.onPages(n);}),
+      Review,WritingSearch,pagination(()=>ref.current.layout,n=>{setPages(n);ref.current.onPages(n);}),
       Extension.create({name:'continuousWritingKeys',priority:1000,addKeyboardShortcuts(){return {
         'Mod-Enter':()=>this.editor.isActive('table')||this.editor.isActive('listItem')||this.editor.commands.insertContent([{type:'pageBreak'},{type:'paragraph'}]),
         'Mod-End':()=>this.editor.chain().setTextSelection(this.editor.state.doc.content.size-1).scrollIntoView().run(),
@@ -31,9 +32,11 @@ export default function FlowEditor(props:Props){
     content:props.content,
     editorProps:{attributes:{class:'page-writing-editor flow-editor','aria-label':'页面正文编辑器',role:'textbox','aria-multiline':'true',spellcheck:'false'},handleDOMEvents:{
       compositionend(view){setTimeout(()=>{if(compositionPending.current&&!view.isDestroyed){compositionPending.current=false;ref.current.onChange(view.state.doc.toJSON());}},40);return false;},
+      click(_view,event){const target=event.target instanceof HTMLElement?event.target.closest<HTMLElement>('[data-comment-id]'):null;if(target?.dataset.commentId)ref.current.onComment?.(target.dataset.commentId);return false;},
     }},
     onUpdate:({editor})=>{if(editor.view.composing){compositionPending.current=true;return;}ref.current.onChange(editor.getJSON() as RichNode);},
     onSelectionUpdate:()=>ref.current.onSelection(),
+    onTransaction:({transaction})=>{if(typeof transaction.getMeta('reviewVisible')==='boolean'||transaction.getMeta('activeRevision'))ref.current.onSelection();},
   });
   useEffect(()=>{props.onReady(editor);return()=>props.onReady(null);},[editor]);
   useEffect(()=>{editor?.setEditable(!props.readOnly);},[editor,props.readOnly]);

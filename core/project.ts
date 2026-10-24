@@ -5,9 +5,10 @@ import { TextHistory, minimalPatch } from './history';
 import { parseLatex, widthReplacement } from './parser';
 import type { Engine, ProjectState, ProjectFile } from './types';
 import { parseWriting, serializeRich, blockSource, type RichNode } from './writing';
-import {canFlow,type FlowPart} from './flow';
+import {canFlow,flowDocument,type FlowPart} from './flow';
 import {WRITING_TOOLS_STYLE} from './writing-tools';
 import {LIST_STYLE,LIST_STYLE_FILE} from './lists';
+import {REVIEW_FILE,readReviewStore,validateReviewDocument,documentSource,reviewData,reviewLocked,relocateComments,type ReviewStore} from './review';
 
 const sourceExtensions = new Set(['.tex', '.bib', '.sty', '.cls', '.txt', '.md', '.bst', '.cfg']);
 const excludedDirectories = new Set(['node_modules', '.git', '.tex-workbench', 'dist', 'dist-electron', 'release']);
@@ -43,6 +44,7 @@ export class Project {
   engine: Engine = 'xelatex';
   readonly files = new Map<string, DiskFile>();
   readonly history = new TextHistory(new Map());
+  private reviewCache?:{text:string;store:ReviewStore};
   constructor(readonly root: string) {}
   static async open(root: string) {
     root = await fs.realpath(root);
@@ -50,7 +52,7 @@ export class Project {
     for (const file of await inventory(root)) {
       const bytes = await fs.readFile(contained(root, file));
       let content: string | null = null, editable = false, encoding = 'binary', bom = false;
-      if (sourceExtensions.has(path.extname(file).toLowerCase()) && bytes.length < 5 * 1024 * 1024) {
+      if ((sourceExtensions.has(path.extname(file).toLowerCase())||file===REVIEW_FILE) && bytes.length < (file===REVIEW_FILE?20:5) * 1024 * 1024) {
         bom = bytes.subarray(0, 3).equals(Buffer.from([0xef, 0xbb, 0xbf]));
         try { content = new TextDecoder('utf-8', { fatal: true }).decode(bytes); editable = true; encoding = bom ? 'UTF-8 BOM' : 'UTF-8'; }
         catch { content = bytes.toString('utf8'); encoding = '非 UTF-8 · 只读'; }
@@ -69,18 +71,34 @@ export class Project {
       const content = this.history.texts.get(file) ?? null;
       return { ...disk.info, content, dirty: !!disk.pendingWrite || (disk.info.editable && content !== disk.original) };
     });
-    return { id: this.id, root: this.root, name: path.basename(this.root), main: this.main, engine: this.engine, version: this.version, files,
+    const state:ProjectState={ id: this.id, root: this.root, name: path.basename(this.root), main: this.main, engine: this.engine, version: this.version, files,
       objects: files.filter(f => f.path.endsWith('.tex') && f.content !== null).flatMap(f => parseLatex(f.content!, f.path)),
       writing:files.filter(f=>f.path.endsWith('.tex')&&f.content!==null).flatMap(f=>parseWriting(f.content!,f.path)),
       canUndo: this.history.canUndo, canRedo: this.history.canRedo, undoLabel: this.history.undoLabel, redoLabel: this.history.redoLabel };
+    try{const stored=this.reviewStore().documents[this.main];if(stored&&canFlow(state))state.reviewDocument=documentSource(stored)===documentSource(flowDocument(state.writing))?stored:relocateComments(stored,flowDocument(state.writing));}
+    catch(error){state.reviewError=String(error instanceof Error?error.message:error);}
+    return state;
   }
+  private reviewStore():ReviewStore{
+    if(!this.files.has(REVIEW_FILE))return {version:1,documents:{}};
+    const text=this.history.texts.get(REVIEW_FILE);if(text===undefined)throw new Error('审阅文件无法读取，原文件已保留。');
+    if(this.reviewCache?.text!==text)this.reviewCache={text,store:readReviewStore(text)};return this.reviewCache!.store;
+  }
+  private reviewPatch(document:RichNode){
+    validateReviewDocument(document);const store=this.reviewStore();
+    const after=JSON.stringify({...store,documents:{...store.documents,[this.main]:document}});
+    if(Buffer.byteLength(after)>20*1024*1024)throw new Error('审阅记录超过 20 MB，请先处理已有修订。');
+    const before=this.history.texts.get(REVIEW_FILE)??JSON.stringify({version:1,documents:{}});
+    return minimalPatch(REVIEW_FILE,before,after);
+  }
+  private ensureReviewFile(){if(!this.files.has(REVIEW_FILE)){const text=JSON.stringify({version:1,documents:{}});this.addFile(REVIEW_FILE,Buffer.from(text),'UTF-8',text);}}
   writeBlock(id:string,content:RichNode,version:number){
     this.assertVersion(version);const matches=this.state().writing.filter(b=>b.id===id),block=matches[0];if(matches.length!==1||!block?.editable||!this.files.get(block.file)?.info.editable)throw new Error('此段落暂不支持页面编辑，或区域 ID 重复。');
     const source=this.history.texts.get(block.file)!;const after='\n'+serializeRich(content)+'\n';
     if(this.history.commit('页面写作',[{file:block.file,...block.bodyRange,before:source.slice(block.bodyRange.from,block.bodyRange.to),after}]))this.version++;
     return this.state();
   }
-  writeFlow(parts:FlowPart[],version:number){
+  writeFlow(parts:FlowPart[],version:number,document?:RichNode){
     this.assertVersion(version);const state=this.state();
     if(!canFlow(state)||!this.files.get(this.main)?.info.editable)throw new Error('这个工程的正文需要在源码视图中编辑。');
     if(!Array.isArray(parts)||!parts.length||new Set(parts.map(p=>p.id)).size!==parts.length||parts.some(p=>!/^[a-zA-Z0-9_-]+$/.test(p.id)))throw new Error('连续文稿的区域标识无效。');
@@ -119,9 +137,16 @@ export class Project {
       if(!/\\usepackage(?:\[[^\]]*\])?\{mogao-tools\}/.test(text))text=text.replace('\\begin{document}','\\usepackage{mogao-tools}\n\\begin{document}');
     }
     if(Buffer.byteLength(text)>5*1024*1024)throw new Error('单个源码文件不能超过 5 MB。');
+    let reviewPatch;
+    const stored=this.reviewStore().documents[this.main];
+    if(document&&(reviewData(document)||stored)){
+      if(documentSource(document)!==serializeRich({type:'doc',content:parts.flatMap(part=>part.content.content??[])}))throw new Error('审阅记录与正文不一致，未保存此次修改。');
+      reviewPatch=this.reviewPatch(document);
+    }else if(stored&&text!==source)throw new Error('请在写作视图中同步审阅信息后修改正文。');
     if(addTools)this.addFile('mogao-tools.sty',Buffer.from(WRITING_TOOLS_STYLE),'UTF-8',WRITING_TOOLS_STYLE);
     if(addLists)this.addFile(LIST_STYLE_FILE,Buffer.from(LIST_STYLE),'UTF-8',LIST_STYLE);
-    if(this.history.commit('连续写作',[minimalPatch(this.main,source,text)]))this.version++;
+    if(reviewPatch)this.ensureReviewFile();
+    if(this.history.commit('连续写作',[minimalPatch(this.main,source,text),...(reviewPatch?[reviewPatch]:[])]))this.version++;
     return this.state();
   }
   private addFile(file:string,bytes:Buffer,encoding:string,content:string|null=null){
@@ -149,10 +174,15 @@ export class Project {
   }
   source(file: string, text: string, version: number) {
     this.assertVersion(version);
+    if(file===REVIEW_FILE)throw new Error('请通过审阅栏修改批注和修订。');
+    const review=this.reviewStore().documents[this.main];
+    if(file===this.main&&reviewLocked(review))throw new Error('请先关闭修订并处理待审修改，再编辑正文源码。');
     if (!this.files.get(file)?.info.editable) throw new Error('文件不可编辑。');
     if (Buffer.byteLength(text) > 5 * 1024 * 1024) throw new Error('单个源码文件不能超过 5 MB。');
     const before = this.history.texts.get(file)!;
-    if (this.history.commit(`编辑 ${file}`, [minimalPatch(file, before, text)])) this.version++;
+    const patches=[minimalPatch(file,before,text)];
+    if(file===this.main&&review){const next=this.state();next.files=next.files.map(f=>f.path===file?{...f,content:text}:f);next.writing=parseWriting(text,file);if(canFlow(next)){const doc=flowDocument(next.writing);if(documentSource(review)!==documentSource(doc))patches.push(this.reviewPatch(relocateComments(review,doc)));}}
+    if (this.history.commit(`编辑 ${file}`, patches)) this.version++;
     return this.state();
   }
   width(id: string, value: number, unit: string, version: number) {

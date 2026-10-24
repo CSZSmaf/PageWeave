@@ -4,17 +4,18 @@ import {AlignCenter,AlignJustify,AlignLeft,AlignRight,Bold,Heading,ImagePlus,Ita
 import {FONTS} from '../../core/writing';
 import ColorPicker from './ColorPicker';
 
-export type RibbonTab='home'|'insert'|'layout'|'image'|'table';
+export type RibbonTab='home'|'insert'|'layout'|'review'|'image'|'table';
 const fontNames:Record<string,string>={SimSun:'宋体',SimHei:'黑体','Microsoft YaHei':'微软雅黑',KaiTi:'楷体',FangSong:'仿宋'};
 function Tool({label,children,...props}:{label:string;children:ReactNode}&ButtonHTMLAttributes<HTMLButtonElement>){return <button aria-label={label} title={label} onMouseDown={event=>event.preventDefault()} {...props}>{children}</button>;}
-interface Props{editor:Editor|null;enabled:boolean;tab:RibbonTab;format(operation:(editor:Editor)=>void):void;history(kind:'undo'|'redo'):void;onMath(display:boolean):void;onImage():void;onTable():void;onLayout():void;onFormulas():void;onOutline():void;onSearch():void}
-export default function WritingToolbar({editor:e,enabled,tab,format,history,onMath,onImage,onTable,onLayout,onFormulas,onOutline,onSearch}:Props){
+interface Props{editor:Editor|null;enabled:boolean;tab:RibbonTab;reviewTools?:ReactNode;format(operation:(editor:Editor)=>void):void;history(kind:'undo'|'redo'):void;onMath(display:boolean):void;onImage():void;onTable():void;onLayout():void;onFormulas():void;onOutline():void;onSearch():void}
+export default function WritingToolbar({editor:e,enabled,tab,reviewTools,format,history,onMath,onImage,onTable,onLayout,onFormulas,onOutline,onSearch}:Props){
   const style=e?.getAttributes('textStyle')??{},para=e?.getAttributes('paragraph')??{},inTable=e?.isActive('table'),inList=e?.isActive('listItem');
   const defaultSize=e?.isActive('heading')?([0,22,17,14][e.getAttributes('heading').level]??12):12;
   const table=(()=>{const p=e?.state.selection.$from;if(p)for(let d=p.depth;d>0;d--)if(p.node(d).type.name==='table')return p.node(d);})();
   const alignments=<div className="tool-group">{[[AlignLeft,'left','左对齐'],[AlignCenter,'center','居中'],[AlignRight,'right','右对齐'],[AlignJustify,'justify','两端对齐']].filter(([,align])=>tab!=='image'||align!=='justify').map(([Icon,align,label])=>{const I=Icon as typeof AlignLeft;return <Tool key={String(align)} label={String(label)} disabled={!enabled} className={e?.isActive({textAlign:align})?'on':''} onClick={()=>format(e=>e.commands.setTextAlign(String(align)))}><I size={17}/></Tool>;})}</div>;
   return <div className="writer-ribbon" role="toolbar" aria-label="文稿编辑工具">
     <div className="tool-group history-group"><Tool label="写作撤销" title="撤销 · Ctrl+Z" disabled={!enabled||!e?.can().undo()} onClick={()=>history('undo')}><Undo2 size={17}/></Tool><Tool label="写作重做" title="重做 · Ctrl+Y" disabled={!enabled||!e?.can().redo()} onClick={()=>history('redo')}><Redo2 size={17}/></Tool></div>
+    {tab==='review'&&reviewTools}
     {tab==='home'&&<>
       <div className="tool-group"><select className="font-select" aria-label="字体" value={style.fontFamily??'SimSun'} disabled={!enabled} onChange={ev=>format(e=>e.commands.setFontFamily(ev.target.value))}>{FONTS.map(f=><option key={f} value={f}>{fontNames[f]??f}</option>)}</select><select className="size-select" aria-label="字号" value={parseFloat(style.fontSize??String(defaultSize))} disabled={!enabled} onChange={ev=>format(e=>e.commands.setFontSize(ev.target.value+'pt'))}>{[8,9,10,10.5,11,12,14,16,17,18,20,22,24,28,32,36,48,72].map(n=><option value={n} key={n}>{n}</option>)}</select>
         <Tool label="加粗" disabled={!enabled} className={e?.isActive('bold')?'on':''} onClick={()=>format(e=>e.commands.toggleBold())}><Bold size={17}/></Tool><Tool label="斜体" disabled={!enabled} className={e?.isActive('italic')?'on':''} onClick={()=>format(e=>e.commands.toggleItalic())}><Italic size={17}/></Tool><Tool label="下划线" disabled={!enabled} className={e?.isActive('underline')?'on':''} onClick={()=>format(e=>e.commands.toggleUnderline())}><Underline size={17}/></Tool><Tool label="清除文字格式" disabled={!enabled} onClick={()=>format(e=>e.chain().unsetAllMarks().run())}><RemoveFormatting size={17}/></Tool><ColorPicker disabled={!enabled} value={style.color??'#000000'} onChange={color=>format(e=>e.commands.setColor(color))}/>

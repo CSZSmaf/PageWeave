@@ -19,6 +19,8 @@ export interface ProjectState {
   files: ProjectFile[]; objects: SemanticObject[]; canUndo: boolean; canRedo: boolean;
   undoLabel?: string; redoLabel?: string;
   writing: WritingBlock[];
+  reviewDocument?:RichNode;
+  reviewError?:string;
 }
 export interface Region { objectId: string; file: string; line: number; page: number; x: number; y: number; width: number; height: number }
 export interface Diagnostic { file?: string; line?: number; message: string }
@@ -34,7 +36,7 @@ export interface WorkbenchApi {
   writingDemo(): Promise<ProjectState | null>;
   newDocument(): Promise<ProjectState | null>;
   writeBlock(id:string,content:RichNode,version:number):Promise<ProjectState>;
-  writeFlow(parts:import('./flow').FlowPart[],version:number):Promise<ProjectState>;
+  writeFlow(parts:import('./flow').FlowPart[],version:number,document?:RichNode):Promise<ProjectState>;
   importImage(bytes:Uint8Array,version:number):Promise<{project:ProjectState;src:string;naturalWidth:number;naturalHeight:number}>;
   imageData(file:string):Promise<string>;
   insertBlock(afterId:string|null,kind:'paragraph'|'equation'|'pageBreak',version:number):Promise<{project:ProjectState;id:string}>;

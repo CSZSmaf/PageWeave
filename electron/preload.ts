@@ -1,0 +1,32 @@
+import { contextBridge, ipcRenderer } from 'electron';
+import type { WorkbenchApi } from '../core/types';
+const api: WorkbenchApi = {
+  initialize: () => ipcRenderer.invoke('project:initialize'),
+  open: () => ipcRenderer.invoke('project:open'),
+  demo: () => ipcRenderer.invoke('project:demo'),
+  writingDemo:()=>ipcRenderer.invoke('writing:demo'),
+  newDocument:()=>ipcRenderer.invoke('writing:new'),
+  writeBlock:(id,content,version)=>ipcRenderer.invoke('writing:edit',id,content,version),
+  writeFlow:(parts,version)=>ipcRenderer.invoke('writing:flow',parts,version),
+  importImage:(bytes,version)=>ipcRenderer.invoke('writing:import-image',bytes,version),
+  imageData:file=>ipcRenderer.invoke('writing:image-data',file),
+  insertBlock:(id,kind,version)=>ipcRenderer.invoke('writing:insert',id,kind,version),
+  deleteBlock:(id,version)=>ipcRenderer.invoke('writing:delete',id,version),
+  pageSettings:(margin,paper,landscape,version)=>ipcRenderer.invoke('writing:page',margin,paper,landscape,version),
+  source: (file, text, version) => ipcRenderer.invoke('project:source', file, text, version),
+  width: (id, value, unit, version) => ipcRenderer.invoke('project:width', id, value, unit, version),
+  undo: version => ipcRenderer.invoke('project:undo', version),
+  redo: version => ipcRenderer.invoke('project:redo', version),
+  save: () => ipcRenderer.invoke('project:save'),
+  reload: () => ipcRenderer.invoke('project:reload'),
+  configure: (main, engine) => ipcRenderer.invoke('project:configure', main, engine),
+  compile: () => ipcRenderer.invoke('build:compile'),
+  previewFormula:latex=>ipcRenderer.invoke('formula:compile',latex),
+  locate: (token, page, x, y) => ipcRenderer.invoke('build:locate', token, page, x, y),
+  exportPdf: token => ipcRenderer.invoke('export:pdf', token),
+  exportProject: () => ipcRenderer.invoke('export:project'),
+  reveal: () => ipcRenderer.invoke('project:reveal'),
+  onCloseRequest: callback => { const listener = () => callback(); ipcRenderer.on('window:close-request', listener); return () => ipcRenderer.removeListener('window:close-request', listener); },
+  finishClose: () => ipcRenderer.invoke('window:finish-close'),
+};
+contextBridge.exposeInMainWorld('workbench', api);

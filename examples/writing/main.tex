@@ -1,0 +1,40 @@
+% 使用 XeLaTeX 编译。
+\documentclass[a4paper,12pt]{article}
+\usepackage[margin=25mm]{geometry}
+\usepackage{mogao}
+\pagestyle{plain}
+\begin{document}
+\MogaoBlock{title}{
+\MogaoHeading{1}{left}{入门教程}
+}
+\MogaoBlock{intro}{
+\MogaoHeading{2}{left}{输入与格式}
+\MogaoPara{left}{1.5}{在写作视图中点击正文输入文字。Enter 分段，Shift+Enter 换行。文字自动换行和分页。选中文字后，在“开始”中设置字体、字号、颜色和段落格式。}
+}
+\MogaoBlock{section-one}{
+\MogaoHeading{2}{left}{公式}
+}
+\MogaoBlock{paragraph-one}{
+\MogaoPara{left}{1.5}{在“插入”中选择行内公式或独立公式。行内公式与正文同排，例如 \MogaoInlineMath{E=mc^2}。独立公式单独占一行：}
+}
+\MogaoBlock{equation-one}{
+\MogaoEquation{a^2+b^2=c^2}
+}
+\MogaoBlock{paragraph-two}{
+\MogaoPara{left}{1.5}{点击公式进行编辑。“重建公式”生成预览，“应用公式”保存修改。}
+}
+\MogaoBlock{section-two}{
+\MogaoHeading{2}{left}{图片和表格}
+}
+\MogaoBlock{paragraph-three}{
+\MogaoPara{left}{1.5}{在“插入”中选择图片或表格。选中图片后调整宽度和对齐方式。点击表格后增删行列，按 Tab 切换单元格。}
+}
+\MogaoBlock{search}{
+\MogaoHeading{2}{left}{查找与替换}
+\MogaoPara{left}{1.5}{Ctrl+F 打开查找，Ctrl+H 打开替换。Enter 查找下一处，Shift+Enter 查找上一处，Esc 关闭。写作视图查找正文，源码视图查找当前文件。}
+}
+\MogaoBlock{saving}{
+\MogaoHeading{2}{left}{保存与导出}
+\MogaoPara{left}{1.5}{Ctrl+S 保存文稿。切换到 PDF 查看排版，切换到源码编辑 LaTeX。在“导出”中保存 PDF 或 LaTeX 工程。“新建”创建空白文稿。}
+}
+\end{document}

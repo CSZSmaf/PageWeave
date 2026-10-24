@@ -1,0 +1,77 @@
+{
+  "name": "tex-workbench",
+  "productName": "墨稿 TeX Workbench",
+  "version": "0.5.0",
+  "private": true,
+  "description": "Continuous page writing, editable formulas and LaTeX PDF output",
+  "main": "dist-electron/main.cjs",
+  "type": "module",
+  "scripts": {
+    "dev": "node scripts/dev.mjs",
+    "build": "tsc --noEmit && vite build && node scripts/build-main.mjs",
+    "start": "electron .",
+    "test": "tsx --test tests/*.test.ts",
+    "test:integration": "tsx --test tests/integration/*.test.ts",
+    "package": "npm run build && electron-builder --win dir"
+  },
+  "dependencies": {
+    "@codemirror/commands": "^6.10.0",
+    "@codemirror/language": "^6.12.0",
+    "@codemirror/legacy-modes": "^6.5.0",
+    "@codemirror/search": "^6.5.0",
+    "@codemirror/state": "^6.5.2",
+    "@codemirror/view": "^6.38.0",
+    "@tiptap/extension-table": "^3.32.0",
+    "@tiptap/extension-text-align": "^3.32.0",
+    "@tiptap/extension-text-style": "^3.32.0",
+    "@tiptap/react": "^3.32.0",
+    "@tiptap/starter-kit": "^3.32.0",
+    "katex": "^0.19.1",
+    "lucide-react": "^0.468.0",
+    "mathlive": "^0.111.1",
+    "pdfjs-dist": "6.4.299",
+    "react": "^19.2.0",
+    "react-dom": "^19.2.0"
+  },
+  "devDependencies": {
+    "@types/katex": "^0.16.8",
+    "@types/node": "^24.0.0",
+    "@types/react": "^19.2.0",
+    "@types/react-dom": "^19.2.0",
+    "@vitejs/plugin-react": "latest",
+    "electron": "45.0.0",
+    "electron-builder": "^26.0.0",
+    "esbuild": "latest",
+    "tsx": "^4.20.0",
+    "typescript": "^5.9.3",
+    "vite": "8.3.5"
+  },
+  "build": {
+    "appId": "local.mogao.texworkbench",
+    "productName": "MoGao",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "dist/**/*",
+      "dist-electron/**/*",
+      "examples/**/*",
+      "assets/**/*",
+      "package.json",
+      "README.md",
+      "THIRD_PARTY_NOTICES.txt",
+      "third-party/**/*"
+    ],
+    "win": {
+      "target": "dir",
+      "signExecutable": false,
+      "icon": "assets/mogao.ico"
+    },
+    "asar": true
+  },
+  "author": "MoGao contributors",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/CSZSmaf/MoGao.git"
+  }
+}

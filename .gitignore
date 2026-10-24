@@ -1,0 +1,48 @@
+# Dependencies and generated application bundles
+node_modules/
+dist/
+dist-electron/
+release/
+output/
+coverage/
+
+# Local documents, profiles, screenshots and tooling state
+.tex-workbench/
+.playwright-cli/
+.codex/
+.vscode/
+.idea/
+user-data/
+papers/
+builds/
+formula-builds/
+preferences.json
+*.local
+.DS_Store
+Thumbs.db
+
+# Credentials and machine configuration
+.env
+.env.*
+.npmrc
+*.pem
+*.key
+*.pfx
+*.p12
+*.keystore
+credentials*.json
+
+# TeX intermediate files
+*.log
+*.aux
+*.synctex.gz
+*.xdv
+*.fls
+*.fdb_latexmk
+*.out
+*.toc
+
+# Release archives are attached to GitHub Releases
+*.zip
+*.7z
+*.exe

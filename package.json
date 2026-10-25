@@ -50,6 +50,7 @@
   "build": {
     "appId": "local.mogao.texworkbench",
     "productName": "PageWeave",
+    "copyright": "Copyright © 2026 CSZSmaf",
     "directories": {
       "output": "release"
     },
@@ -60,6 +61,7 @@
       "assets/**/*",
       "package.json",
       "README.md",
+      "COPYRIGHT",
       "THIRD_PARTY_NOTICES.txt",
       "third-party/**/*"
     ],

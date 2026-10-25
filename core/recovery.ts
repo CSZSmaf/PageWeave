@@ -8,6 +8,7 @@ interface RecordFile {path:string;blob:string;baseline:string|null;size:number}
 interface RecoveryRecord {format:1;id:string;root:string;main:string;engine:Engine;savedAt:string;files:RecordFile[]}
 const sha=(bytes:Buffer|string)=>createHash('sha256').update(bytes).digest('hex');
 const digest=/^[a-f0-9]{64}$/;
+const canonicalRoot=(root:string)=>fs.realpath(root).catch(()=>path.resolve(root));
 export async function atomicWrite(file:string,bytes:Buffer|string){
   const temp=file+'.'+randomUUID()+'.tmp';let handle;
   try{handle=await fs.open(temp,'wx');await handle.writeFile(bytes);await handle.sync();await handle.close();handle=undefined;await fs.rename(temp,file);}
@@ -79,17 +80,19 @@ export class RecoveryStore {
     return {matches,conflict};
   }
   async find(root:string):Promise<RecoveryInfo|null>{
+    root=await canonicalRoot(root);
     await this.queues.get(this.key(root))?.catch(()=>{});const saved=await this.read(root);if(!saved)return null;
     const disk=await this.diskState(saved.record);if(disk.matches)return null;
     return {id:saved.record.id,name:path.basename(saved.record.root),savedAt:saved.record.savedAt,conflict:disk.conflict};
   }
-  clear(root:string,guard=()=>true){return this.serial(root,async()=>{if(!guard())return;const folder=this.folder(root);await fs.mkdir(folder,{recursive:true});await atomicWrite(path.join(folder,'current.json'),JSON.stringify({format:1,root,cleared:true}));await fs.unlink(path.join(folder,'previous.json')).catch(e=>{if(e.code!=='ENOENT')throw e;});});}
+  async clear(root:string,guard=()=>true){root=await canonicalRoot(root);return this.serial(root,async()=>{if(!guard())return;const folder=this.folder(root);await fs.mkdir(folder,{recursive:true});await atomicWrite(path.join(folder,'current.json'),JSON.stringify({format:1,root,cleared:true}));await fs.unlink(path.join(folder,'previous.json')).catch(e=>{if(e.code!=='ENOENT')throw e;});});}
   async save(project:Project){
     await this.checkpoint(project);const state=await project.save();
     if(!state.files.some(file=>file.dirty))await this.clear(project.root,()=>!project.state().files.some(file=>file.dirty));
     return project.state();
   }
   async restore(root:string,id:string){
+    root=await canonicalRoot(root);
     await this.queues.get(this.key(root))?.catch(()=>{});const saved=await this.read(root);
     if(!saved||saved.record.id!==id)throw new Error('恢复记录已变化，请重新打开文稿。');
     const disk=await this.diskState(saved.record);let project:Project;

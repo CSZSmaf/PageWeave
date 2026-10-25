@@ -40,6 +40,14 @@ test('自动保存遇到外部修改不覆盖，恢复到独立副本',async t=>
   const copy=await store.restore(projectRoot,info!.id);assert.notEqual(copy.root,p.root);assert.match(copy.history.texts.get('main.tex')!,/应用里的修改/);assert.equal(await fs.readFile(full,'utf8'),external);assert.equal(await store.find(projectRoot),null);
 });
 
+test('工程目录别名与真实路径使用同一恢复记录',async t=>{
+  const {p,store,root,projectRoot,cache}=await fixture(t),alias=path.join(root,'document-alias');
+  await fs.symlink(projectRoot,alias,'junction');p.writeFlow([{id:'start',content:doc('别名路径中的修改')}],p.version);await store.checkpoint(p);
+  const restarted=new RecoveryStore(cache),info=await restarted.find(alias);assert.ok(info);assert.equal(info.conflict,false);
+  const restored=await restarted.restore(alias,info.id);assert.equal(restored.root,p.root);assert.match(restored.history.texts.get('main.tex')!,/别名路径中的修改/);
+  await restarted.clear(alias);assert.equal(await restarted.find(p.root),null);
+});
+
 test('当前恢复记录或内容损坏时回退到完整的上一版',async t=>{
   for(const corruptBlob of [false,true]){
     const {p,store,projectRoot,cache}=await fixture(t);
@@ -56,7 +64,7 @@ test('当前恢复记录或内容损坏时回退到完整的上一版',async t=>
 test('正常保存后不重复提示；清除记录中断时也不恢复旧版本',async t=>{
   const {p,store,projectRoot,cache}=await fixture(t);
   p.writeFlow([{id:'start',content:doc('版本一')}],p.version);await store.checkpoint(p);p.writeFlow([{id:'start',content:doc('版本二')}],p.version);await store.checkpoint(p);
-  const folder=path.join(cache,(await fs.readdir(cache))[0]);await fs.writeFile(path.join(folder,'current.json'),JSON.stringify({format:1,root:projectRoot,cleared:true}));assert.equal(await store.find(projectRoot),null);
+  const folder=path.join(cache,(await fs.readdir(cache))[0]);await fs.writeFile(path.join(folder,'current.json'),JSON.stringify({format:1,root:p.root,cleared:true}));assert.equal(await store.find(projectRoot),null);
   await store.save(p);assert.equal((await Project.open(projectRoot)).state().files.some(file=>file.dirty),false);assert.equal(await store.find(projectRoot),null);
 });
 

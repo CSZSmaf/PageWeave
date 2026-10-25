@@ -2,6 +2,7 @@ import path from 'node:path';
 import {randomUUID} from 'node:crypto';
 import {Project} from './project';
 import {Compiler} from './compiler';
+import {REVIEW_FILE} from './review';
 
 /** Compile just the equation in an isolated snapshot. Never edit the document. */
 export class FormulaCompiler {
@@ -12,6 +13,8 @@ export class FormulaCompiler {
     const location=path.join(this.root,'sources',randomUUID());
     const state=await project.snapshot(location);
     const copy=await Project.open(location);copy.configure(state.main,'xelatex');
+    // Review locks belong to the document, not the temporary formula source.
+    copy.files.delete(REVIEW_FILE);copy.history.texts.delete(REVIEW_FILE);
     const source=copy.history.texts.get(state.main)!;const start=source.indexOf('\\begin{document}');
     if(start<0)throw new Error('未找到文档正文入口。');
     const preamble=source.slice(0,start)

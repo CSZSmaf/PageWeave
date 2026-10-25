@@ -4,7 +4,7 @@ import {Fragment,type Node as PMNode} from '@tiptap/pm/model';
 import {Mapping} from '@tiptap/pm/transform';
 import {Decoration,DecorationSet} from '@tiptap/pm/view';
 import {closeHistory,isHistoryTransaction} from '@tiptap/pm/history';
-import {advanceBaseline,nodePosition,reviewChanges,reviewData,type ReviewData,type Comment} from '../../core/review';
+import {advanceBaseline,nodePosition,reviewChanges,reviewData,commentTextIndex,findQuoteAnchor,reviewId,type ReviewData,type Comment} from '../../core/review';
 import type {RichNode} from '../../core/writing';
 
 export const reviewKey=new PluginKey<{visible:boolean;active?:string;decorations:DecorationSet}>('pageReview');
@@ -17,6 +17,22 @@ function ensureReview(tr:Transaction):ReviewData{
 }
 export function mapComments(comments:Comment[],mapping:Mapping):Comment[]{
   return comments.map(c=>{if(c.orphaned)return c;const from=mapping.map(c.from,1),to=mapping.map(c.to,-1);return {...c,from:Math.min(from,to),to:Math.max(from,to),orphaned:to<=from};});
+}
+function rejectedComments(comments:Comment[],before:PMNode,after:PMNode,mapping:Mapping):Comment[]{
+  const nodes=after.content.toJSON() as RichNode[],blocks=new Map(nodes.map((node,i)=>[reviewId(node),i]));
+  const indexes=new Map<string,ReturnType<typeof commentTextIndex>>();
+  return mapComments(comments,mapping).map((mapped,i)=>{
+    const original=comments[i];if(original.orphaned||!mapped.orphaned)return mapped;
+    // Whole-block replacement loses positional mappings. Recover only inside the
+    // same surviving blocks; identical words in another paragraph are unrelated.
+    const first=before.maybeChild(before.resolve(original.from).index(0));
+    const last=before.maybeChild(before.resolve(Math.max(original.from,original.to-1)).index(0));
+    const start=blocks.get(first?.attrs.reviewId),end=blocks.get(last?.attrs.reviewId);
+    if(start===undefined||end===undefined||start>end)return mapped;
+    const key=start+':'+end;let index=indexes.get(key);
+    if(!index){index=commentTextIndex(nodes.slice(start,end+1),nodePosition(nodes,start));indexes.set(key,index);}
+    const anchor=findQuoteAnchor(index,original.quote);return anchor?{...mapped,...anchor,orphaned:false}:mapped;
+  });
 }
 function decorations(doc:PMNode,visible:boolean){
   if(!visible)return DecorationSet.empty;
@@ -57,7 +73,8 @@ export function decideRevision(editor:Editor,accept:boolean,id?:string){
     if(accept)baseline.splice(change.fromA,change.toA-change.fromA,...change.after);
     else tr.replaceWith(nodePosition(nodes,change.fromB),nodePosition(nodes,change.toB),Fragment.from(change.before.map(n=>editor.schema.nodeFromJSON(n))));
   }
-  dispatchReview(editor,tr,{...data,baseline,comments:mapComments(data.comments,tr.mapping)});
+  const comments=accept?mapComments(data.comments,tr.mapping):rejectedComments(data.comments,editor.state.doc,tr.doc,tr.mapping);
+  dispatchReview(editor,tr,{...data,baseline,comments});
 }
 export interface CommentAnchor{from:number;to:number;quote:string}
 export function selectedAnchor(editor:Editor):CommentAnchor|null{

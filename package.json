@@ -1,7 +1,7 @@
 {
   "name": "pageweave",
   "productName": "PageWeave",
-  "version": "0.7.0",
+  "version": "0.7.1",
   "private": true,
   "license": "Apache-2.0",
   "description": "Continuous page writing, editable formulas and LaTeX PDF output",

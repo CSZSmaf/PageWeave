@@ -40,6 +40,28 @@ test('停止跟踪保留已有修订，其他段落继续正常编辑',()=>{
   assert.equal(reviewChanges(f.json()).length,1);decideRevision(f.editor,false);
   assert.equal(f.state.doc.child(0).textContent,'第一段文字');assert.match(f.state.doc.child(2).textContent,/直接修改/);assert.equal(reviewChanges(f.json()).length,0);
 });
+
+test('拒绝段落文字或格式修订，保留仍存在的批注锚点及撤销历史',()=>{
+  for(const formatOnly of [false,true]){
+    const f=fixture([para('第一段文字'),para('第一段文字也出现在这里')]);
+    addComment(f.editor,'保留定位',{from:1,to:4,quote:'第一段'});toggleTracking(f.editor);f.boundary();
+    if(formatOnly)f.dispatch(f.state.tr.addMark(1,4,schema.marks.bold.create()));
+    else f.dispatch(f.state.tr.insertText('补充',6));
+    const changed=f.state.doc.textContent;decideRevision(f.editor,false);
+    let c=reviewData(f.json())!.comments[0];assert.equal(c.orphaned,false);assert.equal(c.from,1);assert.equal(c.to,4);assert.equal(f.state.doc.textBetween(c.from,c.to),'第一段');
+    assert.ok(f.undo());assert.equal(f.state.doc.textContent,changed);assert.equal(reviewChanges(f.json()).length,1);
+    assert.ok(f.redo());c=reviewData(f.json())!.comments[0];assert.equal(c.orphaned,false);assert.equal(c.from,1);validateReviewDocument(f.json());
+  }
+});
+
+test('拒绝修订不把批注错误定位到其他段落或有歧义的原文',()=>{
+  for(const repeated of [false,true]){
+    const f=fixture([para(repeated?'相同文字与相同文字':'初始正文'),para('新增内容')]);toggleTracking(f.editor);
+    if(repeated){addComment(f.editor,'重复引用',{from:1,to:5,quote:'相同文字'});f.dispatch(f.state.tr.addMark(1,5,schema.marks.bold.create()));}
+    else{f.dispatch(f.state.tr.insertText('新增内容',1));addComment(f.editor,'新增文字上的批注',{from:1,to:5,quote:'新增内容'});}
+    decideRevision(f.editor,false);const c=reviewData(f.json())!.comments[0];assert.equal(c.orphaned,true);validateReviewDocument(f.json());
+  }
+});
 test('批注锚点跟随输入，删除原文保留引用，撤销恢复锚点与批注状态',()=>{
   const f=fixture();const id=addComment(f.editor,'需要补充说明',{from:1,to:4,quote:'第一段'});f.boundary();f.dispatch(f.state.tr.insertText('前缀',1));
   let c=reviewData(f.json())!.comments[0];assert.equal(c.from,3);assert.equal(c.to,6);

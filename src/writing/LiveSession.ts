@@ -28,7 +28,12 @@ export class LiveSession{
   change(doc:RichNode){this.pending=doc;this.scheduleWrite();}
   changeSource(file:string,text:string){this.sources.set(file,text);this.scheduleWrite();}
   sourceText(file:string){return this.sources.get(file)??this.project.files.find(f=>f.path===file)?.content??'';}
-  private accept(next:ProjectState){if(this.disposed)return;const unchanged=sameRender(this.project,next);this.project=next;this.events.project(next);if(unchanged&&this.preview&&this.preview.version!==next.version){this.preview={...this.preview,version:next.version};this.events.preview(this.preview);}}
+  private accept(next:ProjectState){
+    if(this.disposed)return;
+    const before=this.project,unchanged=sameRender(before,next);this.project=next;this.events.project(next);
+    // Metadata can advance a matching preview, never an already stale PDF.
+    if(unchanged&&this.preview?.projectId===before.id&&this.preview.version===before.version&&before.version!==next.version){this.preview={...this.preview,version:next.version};this.events.preview(this.preview);}
+  }
   private async drain(){
     while((this.pending||this.sources.size)&&!this.disposed){
       const before=this.project;
@@ -58,7 +63,7 @@ export class LiveSession{
     this.building=(async()=>{
       this.events.busy(true);
       try{while(this.requested&&!this.disposed){
-        this.requested=false;const started=this.project;let result=await this.api.compile();
+        clearTimeout(this.buildTimer);this.requested=false;const started=this.project;let result=await this.api.compile();
         if(this.disposed||result.projectId!==this.project.id)continue;
         if(result.version!==this.project.version){if(sameRender(started,this.project))result={...result,version:this.project.version};else{this.requested=true;continue;}}
         this.preview=result;this.events.preview(result);
@@ -67,11 +72,18 @@ export class LiveSession{
     return this.building;
   }
   async latest(){
-    await this.flush();await this.build();
-    // Export/source-switch callers need all edits that arrived during an in-flight build.
-    while(this.pending||this.sources.size||this.preview?.version!==this.project.version){await this.flush();await this.build();}
-    if(!this.preview?.ok)throw new Error('排版未通过，请查看日志。');
-    return this.preview;
+    await this.flush();
+    while(!this.disposed){
+      if(this.building)await this.building;
+      else if(!this.preview?.ok||this.preview.projectId!==this.project.id||this.preview.version!==this.project.version)await this.build();
+      // Include input that arrived while compilation was in progress.
+      await this.flush();
+      if(this.preview?.projectId===this.project.id&&this.preview.version===this.project.version){
+        if(!this.preview.ok)throw new Error('排版未通过，请查看日志。');
+        return this.preview;
+      }
+    }
+    throw new Error('当前文稿已关闭。');
   }
   async idle(){await this.flush();clearTimeout(this.buildTimer);await this.building;if(this.pending||this.sources.size)await this.idle();}
   dispose(){this.disposed=true;clearTimeout(this.writeTimer);clearTimeout(this.maxWriteTimer);clearTimeout(this.buildTimer);}

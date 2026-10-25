@@ -65,13 +65,21 @@ export function readReviewStore(text:string):ReviewStore{
   const store=JSON.parse(text);if(store.version!==1||!store.documents||Array.isArray(store.documents)||typeof store.documents!=='object')throw new Error('审阅文件格式无效。');
   for(const doc of Object.values(store.documents))validateReviewDocument(doc as RichNode);return store;
 }
+export function commentTextIndex(nodes:RichNode[],offset=0){
+  let text='';const positions:number[]=[];
+  const visit=(node:RichNode,pos:number)=>{if(node.type==='text'){for(let i=0;i<(node.text?.length??0);i++){text+=node.text![i];positions.push(pos+i);}return;}if(node.type==='hardBreak'){text+='\n';positions.push(pos);return;}if(nodeSize(node)===1){text+='\uFFFC';positions.push(pos);return;}let childPos=pos+1;for(const child of node.content??[]){visit(child,childPos);childPos+=nodeSize(child);}if(['paragraph','heading'].includes(node.type)){text+='\n';positions.push(childPos);}};
+  let pos=offset;for(const node of nodes){visit(node,pos);pos+=nodeSize(node);}
+  return {text,positions};
+}
+export function findQuoteAnchor({text,positions}:ReturnType<typeof commentTextIndex>,quote:string){
+  const at=quote?text.indexOf(quote):-1;
+  return at>=0&&text.indexOf(quote,at+1)<0?{from:positions[at],to:positions[at+quote.length-1]+1}:null;
+}
 /** After source editing, only unambiguous exact quotes regain an anchor. */
 export function relocateComments(previous:RichNode,current:RichNode):RichNode{
   const data=reviewData(previous);if(!data)return current;
   if(reviewLocked(previous))throw new Error('正文已在外部更改，原审阅记录已保留。请恢复匹配的正文后继续审阅。');
-  const nodes=identify(current.content??[]);let text='';const positions:number[]=[];
-  const visit=(node:RichNode,pos:number)=>{if(node.type==='text'){for(let i=0;i<(node.text?.length??0);i++){text+=node.text![i];positions.push(pos+i);}return;}if(node.type==='hardBreak'){text+='\n';positions.push(pos);return;}if(nodeSize(node)===1){text+='\uFFFC';positions.push(pos);return;}let childPos=pos+1;for(const child of node.content??[]){visit(child,childPos);childPos+=nodeSize(child);}if(['paragraph','heading'].includes(node.type)){text+='\n';positions.push(childPos);}};
-  let pos=0;for(const node of nodes){visit(node,pos);pos+=nodeSize(node);}
-  const comments=data.comments.map(c=>{const at=c.quote?text.indexOf(c.quote):-1,unique=at>=0&&text.indexOf(c.quote,at+1)<0;return {...c,from:unique?positions[at]:0,to:unique?positions[at+c.quote.length-1]+1:0,orphaned:!unique};});
+  const nodes=identify(current.content??[]),index=commentTextIndex(nodes);
+  const comments=data.comments.map(c=>{const anchor=findQuoteAnchor(index,c.quote);return {...c,from:anchor?.from??0,to:anchor?.to??0,orphaned:!anchor};});
   return {...current,content:nodes,attrs:{...current.attrs,review:{...data,baseline:nodes,comments}}};
 }

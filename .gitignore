@@ -18,6 +18,7 @@ builds/
 formula-builds/
 preferences.json
 ai-config.json
+cli-connection.json
 recovery/
 *.local
 .DS_Store

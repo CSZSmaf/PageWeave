@@ -6,5 +6,5 @@
     "allowImportingTsExtensions": true, "resolveJsonModule": true,
     "noEmit": true, "types": ["node", "vite/client"]
   },
-  "include": ["src", "electron", "core", "tests", "vite.config.ts"]
+  "include": ["src", "electron", "core", "cli", "tests", "vite.config.ts"]
 }

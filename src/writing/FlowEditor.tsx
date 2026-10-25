@@ -41,7 +41,7 @@ export default function FlowEditor(props:Props){
     onTransaction:({transaction})=>{if(typeof transaction.getMeta('reviewVisible')==='boolean'||transaction.getMeta('activeRevision'))ref.current.onSelection();},
   });
   useEffect(()=>{props.onReady(editor);return()=>props.onReady(null);},[editor]);
-  useEffect(()=>{editor?.setEditable(!props.readOnly);},[editor,props.readOnly]);
+  useEffect(()=>{editor?.setEditable(!props.readOnly,false);},[editor,props.readOnly]);
   useEffect(()=>{if(!editor)return;const search=writingSearch(editor),changed=()=>search.changed();ref.current.onSearchReady(search);editor.on('update',changed);return()=>{editor.off('update',changed);ref.current.onSearchReady(null);};},[editor]);
   useEffect(()=>{if(editor)editor.view.dispatch(editor.state.tr.setMeta('paperLayout',true).setMeta('addToHistory',false));},[props.layout.width,props.layout.height,props.layout.margin,props.layout.fontSize,props.layout.fontFamily,props.layout.cjkFont,editor]);
   const {width,height,margin}=props.layout,total=pages*(height+PAGE_GAP)-PAGE_GAP;

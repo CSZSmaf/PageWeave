@@ -8,6 +8,7 @@ import {RecoveryStore,atomicWrite} from '../core/recovery';
 import {AiClient,AiSettings} from '../core/ai-client';
 import type { Engine,RecoveryInfo } from '../core/types';
 import {DEFAULT_DOCUMENT_NAME,documentFileName} from '../core/file-name';
+import {attachAutomation} from './automation-bridge';
 
 const customData=process.env.PAGEWEAVE_USER_DATA??process.env.MOGAO_USER_DATA;
 if(customData)app.setPath('userData',path.resolve(customData));
@@ -162,5 +163,6 @@ app.whenReady().then(async () => {
   handler('window:finish-close', async () => { if (await confirmLeave()) { allowClose = true; window.close(); } });
   if (process.env.VITE_DEV_SERVER_URL) await window.loadURL(process.env.VITE_DEV_SERVER_URL);
   else await window.loadFile(path.join(app.getAppPath(), 'dist', 'index.html'));
+  await attachAutomation(window,dataRoot(),()=>project,recovery,compiler,()=>!!pendingRecovery).catch(error=>console.warn('CLI connection unavailable:',error.code??error.message));
 }).catch(error => { dialog.showErrorBox('PageWeave 无法启动', String(error)); app.quit(); });
 app.on('window-all-closed', () => app.quit());

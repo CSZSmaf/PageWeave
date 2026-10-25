@@ -53,6 +53,10 @@ export default function WritingApp(){
   const [commentFocus,setCommentFocus]=useState<{id:string;nonce:number}|null>(null);
   const imageInput=useRef<HTMLInputElement>(null);
   const session=useRef<LiveSession|null>(null),editor=useRef<Editor|null>(null);
+  const automationHandler=useRef<(request:{id:string;action:string})=>Promise<void>>(async()=>{});
+  const inputComposing=useRef(false);
+  useEffect(()=>{const start=()=>{inputComposing.current=true;},end=()=>{inputComposing.current=false;};window.addEventListener('compositionstart',start,true);window.addEventListener('compositionend',end,true);return()=>{window.removeEventListener('compositionstart',start,true);window.removeEventListener('compositionend',end,true);};},[]);
+  useEffect(()=>api.onAutomationRequest(request=>void automationHandler.current(request)),[]);
   const notify=(value:unknown,bad=false)=>{setMessage(String(value instanceof Error?value.message:value).replace(/^Error invoking remote method '[^']+': Error: /,''));setError(bad);};
   const run=async(fn:()=>Promise<unknown>)=>{try{await fn();}catch(error){notify(error,true);}};
   const tick=()=>setTick(n=>n+1);
@@ -95,6 +99,31 @@ export default function WritingApp(){
   const history=(kind:'undo'|'redo')=>{setView('write');editor.current?.chain().focus()[kind]().run();tick();};
   const switchProject=(kind:'open'|'writingDemo'|'newDocument'|'reload',mode:'file'|'folder'='file')=>run(async()=>{if(switchingView.current||!session.current)return;const previous=session.current;switchingView.current=true;setSwitching(true);try{capture();await previous.idle();const next=await (kind==='open'?api.open(mode):api[kind]());if(next)load(next);}finally{if(session.current===previous)previous.resume();switchingView.current=false;setSwitching(false);}});
   const renameDocument=async(name:string)=>{if(switchingView.current||!session.current)throw new Error('请稍后重试。');const previous=session.current,main=previous.project.main;switchingView.current=true;setSwitching(true);try{capture();await previous.idle();await previous.mutate(p=>api.renameDocument(name,p.version));if(sourceFile===main)setSourceFile(previous.project.main);}finally{previous.resume();switchingView.current=false;setSwitching(false);}};
+  automationHandler.current=async request=>{
+    const previous=session.current,e=editor.current;
+    if(!previous||switchingView.current||inputComposing.current||e?.view.composing||document.querySelector('.modal-backdrop')){await api.automationFinish(request.id,'编辑器正在切换文稿、输入或处理对话框，请稍后重试。');return;}
+    switchingView.current=true;setSwitching(true);e?.setEditable(false,false);
+    let failure:string|undefined,unlocked=false;
+    const unlock=()=>{if(unlocked)return;unlocked=true;previous.resume();switchingView.current=false;setSwitching(false);if(e&&!e.isDestroyed)e.setEditable(!previous.project.reviewError,false);};
+    try{
+      capture();await previous.pause();
+      if(request.action==='compile'){
+        // Compilation uses an immutable snapshot. Continue typing while TeX runs.
+        const result=api.automationExecute(request.id);unlock();await result;
+      }else{
+        let step:Awaited<ReturnType<typeof api.automationExecute>>|undefined;
+        await previous.mutate(async()=>{step=await api.automationExecute(request.id);return step.project;});
+        if(step&&step.refresh!=='none'){
+          const next=previous.project,content=next.reviewDocument??flowDocument(next.writing);
+          setSeed(content);sourceVersion.current=next.version;
+          if(canFlow(next)){
+            if(e&&!e.isDestroyed){e.commands.setContent(content,{emitUpdate:false});e.view.dispatch(e.state.tr.setMeta('paperLayout',true).setMeta('addToHistory',false));}
+          }else if(currentView.current==='write'){currentView.current='source';setView('source');setSourceFile(next.main);}
+        }
+      }
+    }catch(error){failure=String(error instanceof Error?error.message:error);}
+    finally{unlock();await api.automationFinish(request.id,failure).catch(()=>{});}
+  };
   const changeView=(next:'write'|'pdf'|'source')=>run(async()=>{
     if(switchingView.current||next===currentView.current)return;
     switchingView.current=true;setSwitching(true);

@@ -111,6 +111,7 @@ export class LiveSession{
     throw new Error('当前文稿已关闭。');
   }
   async idle(){await this.flush();clearTimeout(this.buildTimer);this.clearSaveTimers();await this.building;if(this.pending||this.sources.size||this.pendingPlan)await this.idle();}
+  async pause(){await this.flush();clearTimeout(this.buildTimer);this.clearSaveTimers();}
   resume(){if(this.disposed)return;this.scheduleSave();if(this.preview?.version!==this.project.version&&!this.building)this.scheduleBuild();}
   dispose(){this.disposed=true;clearTimeout(this.writeTimer);clearTimeout(this.maxWriteTimer);clearTimeout(this.buildTimer);this.clearSaveTimers();}
 }

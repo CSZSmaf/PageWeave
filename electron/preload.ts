@@ -1,6 +1,9 @@
 import { contextBridge, ipcRenderer } from 'electron';
 import type { WorkbenchApi } from '../core/types';
 const api: WorkbenchApi = {
+  onAutomationRequest:callback=>{const listener=(_event:Electron.IpcRendererEvent,request:{id:string;action:string})=>callback(request);ipcRenderer.on('automation:request',listener);return()=>ipcRenderer.removeListener('automation:request',listener);},
+  automationExecute:id=>ipcRenderer.invoke('automation:execute',id),
+  automationFinish:(id,error)=>ipcRenderer.invoke('automation:finish',id,error),
   aiStatus:()=>ipcRenderer.invoke('ai:status'),
   aiConfigure:(config,key)=>ipcRenderer.invoke('ai:configure',config,key),
   aiRequest:request=>ipcRenderer.invoke('ai:request',request),

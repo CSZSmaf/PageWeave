@@ -33,6 +33,9 @@ export interface CompileResult {
 export interface ToolInfo { name: string; available: boolean; detail: string }
 export interface RecoveryInfo {id:string;name:string;savedAt:string;conflict:boolean}
 export interface WorkbenchApi {
+  onAutomationRequest(callback:(request:{id:string;action:string})=>void):()=>void;
+  automationExecute(id:string):Promise<import('./automation').AutomationStep>;
+  automationFinish(id:string,error?:string):Promise<void>;
   aiStatus():Promise<import('./ai').AiStatus>;
   aiConfigure(config:import('./ai').AiConfig,key?:string):Promise<import('./ai').AiStatus>;
   aiRequest(request:import('./ai').AiRequest):Promise<import('./ai').AiReply>;

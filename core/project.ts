@@ -286,6 +286,12 @@ export class Project {
   capture():ProjectSnapshot {
     return {root:this.root,main:this.main,engine:this.engine,scope:this.scope,files:[...this.files].map(([file,disk])=>({path:file,bytes:this.encode(file),baseline:disk.pendingWrite?null:disk.bytes}))};
   }
+  forkSnapshot(){
+    const copy=new Project(this.root);copy.main=this.main;copy.engine=this.engine;copy.scope=this.scope;copy.version=this.version;
+    for(const [name,file]of this.files)copy.files.set(name,{...file,info:{...file.info}});
+    for(const [name,text]of this.history.texts)copy.history.texts.set(name,text);
+    return copy;
+  }
   async restore(snapshot:ProjectSnapshot){
     if(path.resolve(snapshot.root)!==this.root)throw new Error('恢复记录不属于当前工程。');
     for(const file of snapshot.files){

@@ -1,7 +1,7 @@
 {
   "name": "pageweave",
   "productName": "PageWeave",
-  "version": "0.9.1",
+  "version": "0.10.0",
   "private": true,
   "license": "Apache-2.0",
   "description": "Continuous page writing, editable formulas and LaTeX PDF output",
@@ -11,6 +11,7 @@
     "dev": "node scripts/dev.mjs",
     "build": "tsc --noEmit && vite build && node scripts/build-main.mjs",
     "start": "electron .",
+    "cli": "tsx cli/main.ts",
     "test": "tsx --test tests/*.test.ts",
     "test:integration": "tsx --test tests/integration/*.test.ts",
     "package": "npm run build && electron-builder --win dir"
@@ -62,6 +63,7 @@
       "assets/**/*",
       "package.json",
       "README.md",
+      "docs/CLI.md",
       "COPYRIGHT",
       "LICENSE",
       "THIRD_PARTY_NOTICES.txt",
@@ -72,7 +74,17 @@
       "signExecutable": false,
       "icon": "assets/pageweave.ico"
     },
-    "asar": true
+    "asar": true,
+    "extraFiles": [
+      {
+        "to": "pageweave.cmd",
+        "from": "scripts/pageweave.cmd"
+      },
+      {
+        "from": "docs/CLI.md",
+        "to": "docs/CLI.md"
+      }
+    ]
   },
   "author": "PageWeave contributors",
   "repository": {

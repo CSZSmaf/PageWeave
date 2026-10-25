@@ -7,6 +7,7 @@ export const LAYOUT_STYLE=String.raw`\NeedsTeXFormat{LaTeX2e}
 \newif\ifPageWeavePlanValid
 \newsavebox{\PageWeaveCellBox}
 \newcommand{\PageWeaveCheckFile}[2]{\ifnum\pdf@strcmp{\pdf@filemdfivesum{#1}}{#2}=0\else\global\PageWeavePlanValidfalse\fi}
+\newcommand{\PageWeaveCheckJob}[1]{\ifnum\pdf@strcmp{\jobname}{#1}=0\else\ifnum\pdf@strcmp{\jobname}{"#1"}=0\else\global\PageWeavePlanValidfalse\fi\fi}
 \newcommand{\PageWeaveBreak}{\par\newpage}
 \newcommand{\PageWeaveTableBreak}{\noalign{\penalty-10000}}
 \edef\PageWeaveBaseSize{\f@size}
@@ -32,3 +33,4 @@ export const LAYOUT_STYLE=String.raw`\NeedsTeXFormat{LaTeX2e}
 }
 \makeatother
 `;
+export const PREVIOUS_LAYOUT_STYLE=LAYOUT_STYLE.split('\n').filter(line=>!line.startsWith('\\newcommand{\\PageWeaveCheckJob}')).join('\n');

@@ -50,10 +50,10 @@ export function pagedBlocks(doc:RichNode,blocks:WritingBlock[],breaks:number[]){
   return result;
 }
 
-export function pagePlanSource(doc:RichNode,blocks:WritingBlock[],plan:PagePlan,files:{path:string;bytes:Buffer}[]){
+export function pagePlanSource(doc:RichNode,blocks:WritingBlock[],plan:PagePlan,files:{path:string;bytes:Buffer}[],main=blocks[0]?.file??'main.tex'){
   const size=(doc.content??[]).reduce((n,node)=>n+nodeSize(node),0);
   if(!Array.isArray(plan.breaks)||plan.breaks.length>3000||plan.breaks.some((at,i)=>!Number.isInteger(at)||at<=0||at>=size||(i>0&&at<=plan.breaks[i-1])))throw new Error('分页数据无效。');
-  const rendered=pagedBlocks(doc,blocks,plan.breaks),checks:string[]=[];
+  const rendered=pagedBlocks(doc,blocks,plan.breaks),job=main.replaceAll('\\','/').split('/').at(-1)!.replace(/\.tex$/i,''),checks:string[]=[`\\providecommand{\\PageWeaveCheckJob}[1]{\\PageWeavePlanValidfalse}`,`\\PageWeaveCheckJob{\\detokenize{${job}}}`];
   for(const file of files.filter(file=>/\.(tex|sty|cls|cfg)$/i.test(file.path)&&file.path!==PAGE_PLAN_FILE)){
     if(/[{}%\r\n]/.test(file.path))throw new Error('入口或样式文件名不支持同步分页。');
     checks.push(`\\PageWeaveCheckFile{\\detokenize{${file.path}}}{${createHash('md5').update(file.bytes).digest('hex').toUpperCase()}}`);

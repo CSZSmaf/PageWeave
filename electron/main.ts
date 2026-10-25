@@ -7,6 +7,7 @@ import {FormulaCompiler} from '../core/formula';
 import {RecoveryStore,atomicWrite} from '../core/recovery';
 import {AiClient,AiSettings} from '../core/ai-client';
 import type { Engine,RecoveryInfo } from '../core/types';
+import {DEFAULT_DOCUMENT_NAME,documentFileName} from '../core/file-name';
 
 const customData=process.env.PAGEWEAVE_USER_DATA??process.env.MOGAO_USER_DATA;
 if(customData)app.setPath('userData',path.resolve(customData));
@@ -17,7 +18,7 @@ let window: BrowserWindow, project: Project, compiler: Compiler, allowClose = fa
 let recovery:RecoveryStore,pendingRecovery:{root:string;info:RecoveryInfo}|null=null;
 const dataRoot = () => app.getPath('userData');
 async function preferences() { try { return JSON.parse(await fs.readFile(path.join(dataRoot(), 'preferences.json'), 'utf8')); } catch { return {}; } }
-async function persist() { await fs.mkdir(dataRoot(), { recursive: true }); await atomicWrite(path.join(dataRoot(), 'preferences.json'), JSON.stringify({ root: project.root, main: project.main, engine: project.engine }, null, 2)); }
+async function persist() { await fs.mkdir(dataRoot(), { recursive: true }); await atomicWrite(path.join(dataRoot(), 'preferences.json'), JSON.stringify({ root: project.root, main: project.main, engine: project.engine,scope:project.scope }, null, 2)); if(window&&!window.isDestroyed())window.setTitle(documentFileName(project.main)+' — PageWeave'); }
 const currentState=()=>({...project.state(),recovery:pendingRecovery?.info??null});
 async function selectProject(next:Project){project=next;const info=await recovery.find(next.root);pendingRecovery=info?{root:next.root,info}:null;if(!info){project.prepareWritingLayout();await recovery.checkpoint(project);}await persist();return currentState();}
 async function demoProject() {
@@ -63,13 +64,13 @@ app.whenReady().then(async () => {
   const formulaCompiler=new FormulaCompiler(path.join(dataRoot(),'formula-builds'));
   const prefs = await preferences();
   const requested = process.argv.find(a => a.startsWith('--project='))?.slice('--project='.length);
-  try { project = await Project.open(requested ?? prefs.root); if (prefs.root === project.root && prefs.main && prefs.engine) project.configure(prefs.main, prefs.engine); }
+  try { const input=requested??prefs.root;if(typeof input!=='string')throw new Error('No previous document');project=/\.tex$/i.test(input)?await Project.openFile(input):await Project.open(input,!requested&&prefs.scope==='file'?prefs.main:undefined); if (!requested&&project.files.has(prefs.main)&&prefs.engine) project.configure(prefs.main, prefs.engine); }
   catch { project = await writingProject(); }
-  const recoveryRoot=requested??prefs.root??project.root,recoveryInfo=await recovery.find(recoveryRoot);
+  const recoveryRoot=requested?project.root:typeof prefs.root==='string'?prefs.root:project.root,recoveryInfo=await recovery.find(recoveryRoot);
   pendingRecovery=recoveryInfo?{root:recoveryRoot,info:recoveryInfo}:null;
   if(!pendingRecovery){project.prepareWritingLayout();await recovery.checkpoint(project);}
   if(!pendingRecovery)await persist();
-  window = new BrowserWindow({ width: 1600, height: 1000, minWidth: 1100, minHeight: 720, title: 'PageWeave', backgroundColor: '#f2f5f9', show: false, icon: path.join(app.getAppPath(), 'assets', 'pageweave.ico'),
+  window = new BrowserWindow({ width: 1600, height: 1000, minWidth: 1100, minHeight: 720, title: documentFileName(project.main)+' — PageWeave', backgroundColor: '#f2f5f9', show: false, icon: path.join(app.getAppPath(), 'assets', 'pageweave.ico'),
     webPreferences: { preload: path.join(__dirname, 'preload.cjs'), contextIsolation: true, nodeIntegration: false, sandbox: true, spellcheck: false, backgroundThrottling: false, offscreen: process.env.PAGEWEAVE_BACKGROUND_TEST==='offscreen' } });
   window.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
   window.webContents.on('will-navigate', event => { if(event.url!==window.webContents.getURL())event.preventDefault(); });
@@ -104,15 +105,17 @@ app.whenReady().then(async () => {
     if(action==='restore')project=await recovery.restore(root,id);else await recovery.clear(root);
     pendingRecovery=null;project.prepareWritingLayout();await recovery.checkpoint(project);await persist();return currentState();
   });
-  handler('project:open', async () => {
+  handler('project:open', async (mode='file') => {
     if (!await confirmLeave()) return null;
-    const choice = await dialog.showOpenDialog(window, { title: '打开 LaTeX 工程目录', properties: ['openDirectory'] });
+    const folder=mode==='folder';
+    const choice = await dialog.showOpenDialog(window, { title: folder?'打开 LaTeX 工程文件夹':'打开 LaTeX 文稿', properties: folder?['openDirectory']:['openFile'],...(!folder?{filters:[{name:'LaTeX 文稿',extensions:['tex']}]}:{}) });
     if (choice.canceled) return null;
-    return selectProject(await Project.open(choice.filePaths[0]));
+    return selectProject(folder?await Project.open(choice.filePaths[0]):await Project.openFile(choice.filePaths[0]));
   });
+  handler('project:rename',async(name:string,version:number)=>{project.assertVersion(version);await recovery.save(project);await project.renameMain(name,project.version);await recovery.checkpoint(project);await persist();return currentState();});
   handler('project:demo', async () => { if (!await confirmLeave()) return null; return selectProject(await demoProject()); });
   handler('writing:demo',async()=>{if(!await confirmLeave())return null;return selectProject(await writingProject());});
-  handler('writing:new',async()=>{if(!await confirmLeave())return null;const choice=await dialog.showOpenDialog(window,{title:'选择新文稿的存放目录',properties:['openDirectory','createDirectory']});if(choice.canceled)return null;const destination=path.join(choice.filePaths[0],'新文稿-'+Date.now());const next=await writingProject(destination);const text=next.history.texts.get('main.tex')!;next.source('main.tex',text.replace(/\\begin\{document\}[\s\S]*\\end\{document\}/,'\\begin{document}\n\\MogaoBlock{start}{\n\\MogaoPara{justify}{1.5}{\\strut}\n}\n\\end{document}'),0);await next.save();project=await Project.open(destination);await persist();return project.state();});
+  handler('writing:new',async()=>{if(!await confirmLeave())return null;const directory=path.join(app.getPath('documents'),'PageWeave');await fs.mkdir(directory,{recursive:true});const choice=await dialog.showSaveDialog(window,{title:'新建 LaTeX 文稿',defaultPath:path.join(directory,DEFAULT_DOCUMENT_NAME),buttonLabel:'创建',filters:[{name:'LaTeX 文稿',extensions:['tex']}]});if(choice.canceled||!choice.filePath)return null;return selectProject(await Project.createDocument(choice.filePath,path.join(app.getAppPath(),'examples','writing')));});
   handler('writing:edit',(id,content,version)=>project.writeBlock(id,content,version));
   handler('writing:flow',(parts,version,document)=>project.writeFlow(parts,version,document));
   handler('writing:plan',(plan,version)=>project.pagePlan(plan,version));
@@ -127,7 +130,7 @@ app.whenReady().then(async () => {
   handler('writing:insert',(id,kind,version)=>project.insertBlock(id,kind,version));
   handler('writing:delete',(id,version)=>project.deleteBlock(id,version));
   handler('writing:page',(margin,paper,landscape,version)=>project.pageSettings(margin,paper,landscape,version));
-  handler('project:source', (file: string, text: string, version: number) => project.source(file, text, version));
+  handler('project:source', (file: string, text: string, version: number) => project.sourceWithDependencies(file,text,version));
   handler('project:width', (id: string, value: number, unit: string, version: number) => project.width(id, value, unit, version));
   handler('project:undo', (version: number) => project.undo(version));
   handler('project:redo', (version: number) => project.redo(version));
@@ -138,7 +141,7 @@ app.whenReady().then(async () => {
     if(choice.canceled||!choice.filePath)return null;
     const previous=project.root,next=await project.saveAs(choice.filePath);await recovery.clear(previous);return selectProject(next);
   });
-  handler('project:reload', async () => { if (!await confirmLeave()) return null; const next = await Project.open(project.root); next.configure(project.main, project.engine); return selectProject(next); });
+  handler('project:reload', async () => { if (!await confirmLeave()) return null; const next = await Project.open(project.root,project.scope==='file'?project.main:undefined); next.configure(project.main, project.engine); return selectProject(next); });
   handler('project:configure', async (main: string, engine: Engine) => { const state = project.configure(main, engine); await persist(); return state; });
   handler('project:reveal', async () => { await shell.openPath(project.root); });
   handler('build:compile', () => compiler.compile(project));
@@ -146,7 +149,7 @@ app.whenReady().then(async () => {
   handler('build:locate', (token: string, page: number, x: number, y: number) => compiler.locate(token, page, x, y));
   handler('export:pdf', async (token: string) => {
     const source = compiler.pdfPath(token);
-    const choice = await dialog.showSaveDialog(window, { title: '导出当前预览的 PDF', defaultPath: path.join(project.root, path.basename(project.main, '.tex') + '.pdf'), filters: [{ name: 'PDF', extensions: ['pdf'] }] });
+    const choice = await dialog.showSaveDialog(window, { title: '导出当前预览的 PDF', defaultPath: path.join(project.root, path.basename(project.main).replace(/\.tex$/i,'') + '.pdf'), filters: [{ name: 'PDF', extensions: ['pdf'] }] });
     if (choice.canceled || !choice.filePath) return null;
     await fs.copyFile(source, choice.filePath); return choice.filePath;
   });

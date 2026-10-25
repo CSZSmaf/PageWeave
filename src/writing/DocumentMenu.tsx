@@ -1,0 +1,17 @@
+import {useEffect,useRef,useState} from 'react';
+import {ChevronDown,FolderOpen,Pencil,Save,X} from 'lucide-react';
+import {texFileName} from '../../core/file-name';
+
+export default function DocumentMenu({name,path,dirty,disabled,onRename,onSaveAs,onReveal}:{name:string;path:string;dirty:boolean;disabled:boolean;onRename(name:string):Promise<void>;onSaveAs():void;onReveal():void}){
+  const [open,setOpen]=useState(false),[editing,setEditing]=useState(false),[value,setValue]=useState(name),[error,setError]=useState(''),[saving,setSaving]=useState(false);
+  const host=useRef<HTMLDivElement>(null),input=useRef<HTMLInputElement>(null),trigger=useRef<HTMLButtonElement>(null);
+  useEffect(()=>{if(!open)return;const dismiss=(e:PointerEvent)=>{if(!host.current?.contains(e.target as Node))setOpen(false);};const escape=(e:KeyboardEvent)=>{if(e.key==='Escape')setOpen(false);};window.addEventListener('pointerdown',dismiss);window.addEventListener('keydown',escape);return()=>{window.removeEventListener('pointerdown',dismiss);window.removeEventListener('keydown',escape);};},[open]);
+  useEffect(()=>{if(editing){input.current?.focus();input.current?.setSelectionRange(0,value.replace(/\.tex$/i,'').length);}},[editing]);
+  function close(){if(saving)return;setEditing(false);trigger.current?.focus();}
+  async function submit(){if(saving)return;setError('');try{const next=texFileName(value);setSaving(true);await onRename(next);setEditing(false);trigger.current?.focus();}catch(e){setError(String(e instanceof Error?e.message:e).replace(/^Error invoking remote method '[^']+': Error: /,''));}finally{setSaving(false);}}
+  return <div className="writer-docname document-menu" ref={host}>
+    <button ref={trigger} className="document-name-button" aria-label="文稿文件菜单" aria-expanded={open} aria-haspopup="menu" disabled={disabled} title={path} onClick={()=>setOpen(!open)}><strong>{name}</strong>{dirty&&<i className="document-dirty" title="未保存"/>}<ChevronDown size={13}/></button>
+    {open&&<div className="dropdown document-dropdown" role="menu" aria-label="文稿文件操作"><button role="menuitem" onClick={()=>{setOpen(false);setValue(name);setError('');setEditing(true);}}><Pencil size={15}/>重命名</button><button role="menuitem" onClick={()=>{setOpen(false);onSaveAs();}}><Save size={15}/>另存为</button><button role="menuitem" onClick={()=>{setOpen(false);onReveal();}}><FolderOpen size={15}/>打开所在文件夹</button></div>}
+    {editing&&<div className="modal-backdrop" onKeyDown={e=>{e.stopPropagation();if(e.key==='Escape'&&!e.nativeEvent.isComposing){e.preventDefault();close();}}}><form className="modal document-rename-dialog" role="dialog" aria-modal="true" aria-label="重命名文稿" onSubmit={e=>{e.preventDefault();void submit();}}><div className="modal-title"><h2>重命名</h2><button type="button" aria-label="取消重命名" disabled={saving} onClick={close}><X size={18}/></button></div><label htmlFor="document-filename">文件名</label><input id="document-filename" ref={input} value={value} disabled={saving} onChange={e=>setValue(e.target.value)} spellCheck={false} autoComplete="off" onKeyDown={e=>{if(e.key==='Enter'&&e.nativeEvent.isComposing)e.preventDefault();}}/>{error&&<p className="formula-error" role="alert">{error}</p>}<div className="document-rename-actions"><button type="button" className="outline-button" disabled={saving} onClick={close}>取消</button><button type="submit" className="primary-button" disabled={saving||!value.trim()}>{saving?'正在重命名…':'保存'}</button></div></form></div>}
+  </div>;
+}

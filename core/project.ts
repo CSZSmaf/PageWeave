@@ -9,14 +9,17 @@ import {canFlow,flowDocument,paperLayout,type FlowPart} from './flow';
 import {WRITING_TOOLS_STYLE} from './writing-tools';
 import {LIST_STYLE,LIST_STYLE_FILE} from './lists';
 import {REVIEW_FILE,readReviewStore,validateReviewDocument,documentSource,reviewData,reviewLocked,relocateComments,type ReviewStore} from './review';
-import {LAYOUT_STYLE,LAYOUT_STYLE_FILE} from './layout-style';
+import {LAYOUT_STYLE,LAYOUT_STYLE_FILE,PREVIOUS_LAYOUT_STYLE} from './layout-style';
 import {PAGE_PLAN_FILE,pagePlanSource,type PagePlan} from './page-plan';
+import {documentFiles} from './document-files';
+import {texFileName} from './file-name';
+import {constants as fsConstants} from 'node:fs';
 
 const sourceExtensions = new Set(['.tex', '.bib', '.sty', '.cls', '.txt', '.md', '.bst', '.cfg']);
 const excludedDirectories = new Set(['node_modules', '.git', '.tex-workbench', 'dist', 'dist-electron', 'release','recovery']);
 const buildFile = /\.(aux|log|toc|out|fls|fdb_latexmk|xdv|synctex(?:\.gz)?|nav|snm|vrb)$/i;
 interface DiskFile { info: ProjectFile; bytes: Buffer; bom: boolean; original: string | null; pendingWrite?:boolean }
-export interface ProjectSnapshot {root:string;main:string;engine:Engine;files:{path:string;bytes:Buffer;baseline:Buffer|null}[]}
+export interface ProjectSnapshot {root:string;main:string;engine:Engine;scope?:'file'|'folder';files:{path:string;bytes:Buffer;baseline:Buffer|null}[]}
 export function contained(root: string, relative: string) {
   if (path.isAbsolute(relative)) throw new Error('仅允许访问当前工程内的相对路径。');
   const target = path.resolve(root, relative), rel = path.relative(root, target);
@@ -45,14 +48,16 @@ export class Project {
   version = 0;
   main = '';
   engine: Engine = 'xelatex';
+  scope:'file'|'folder'='folder';
   readonly files = new Map<string, DiskFile>();
   readonly history = new TextHistory(new Map());
   private reviewCache?:{text:string;store:ReviewStore};
   constructor(readonly root: string) {}
-  static async open(root: string) {
+  static async open(root: string, selectedMain?:string) {
     root = await fs.realpath(root);
     const p = new Project(root);
-    for (const file of await inventory(root)) {
+    p.scope=selectedMain?'file':'folder';
+    for (const file of selectedMain?await documentFiles(root,selectedMain):await inventory(root)) {
       const bytes = await fs.readFile(contained(root, file));
       let content: string | null = null, editable = false, encoding = 'binary', bom = false;
       if ((sourceExtensions.has(path.extname(file).toLowerCase())||file===REVIEW_FILE) && bytes.length < (file===REVIEW_FILE?20:5) * 1024 * 1024) {
@@ -63,15 +68,67 @@ export class Project {
       p.files.set(file, { info: { path: file, content, editable, dirty: false, encoding, size: bytes.length }, bytes, bom, original: content });
       if (content !== null) p.history.texts.set(file, content);
     }
-    const candidates = [...p.files].filter(([file, data]) => file.endsWith('.tex') && /\\documentclass(?:\s|\[|\{)/.test(data.original ?? '')).map(([file]) => file);
-    p.main = candidates.includes('main.tex') ? 'main.tex' : candidates[0] ?? [...p.files.keys()].find(f => f.endsWith('.tex')) ?? '';
+    const candidates = [...p.files].filter(([file, data]) => /\.tex$/i.test(file) && /\\documentclass(?:\s|\[|\{)/.test(data.original ?? '')).map(([file]) => file);
+    p.main = selectedMain??(candidates.includes('main.tex') ? 'main.tex' : candidates[0] ?? [...p.files.keys()].find(f => f.endsWith('.tex')) ?? '');
     if (!p.main) throw new Error('目录内没有 .tex 文件。请选择 LaTeX 工程目录。');
     return p;
+  }
+  static async openFile(file:string){
+    if(!/\.tex$/i.test(file))throw new Error('请选择 .tex 文件。PDF、Word 文档不能作为 LaTeX 源码打开。');
+    const real=await fs.realpath(file);return Project.open(path.dirname(real),path.basename(real));
+  }
+  static async createDocument(file:string,template:string){
+    const name=texFileName(path.basename(file)),root=await fs.realpath(path.dirname(file)),target=contained(root,name);
+    if(await fs.lstat(target).catch(()=>null))throw new Error('这个文件名已存在，请使用其他名称。');
+    const original=await Project.open(template),source=original.history.texts.get(original.main)!.replace(/\\begin\{document\}[\s\S]*\\end\{document\}/,'\\begin{document}\n\\MogaoBlock{start}{\n\\MogaoPara{justify}{1.5}{\\strut}\n}\n\\end{document}');
+    const styles=original.capture().files.filter(f=>/\.(sty|cls)$/i.test(f.path));
+    for(const style of styles){const full=contained(root,style.path),existing=await fs.lstat(full).catch(()=>null);if(existing&&(existing.isSymbolicLink()||!existing.isFile()||!(await fs.readFile(full)).equals(style.bytes)))throw new Error(`此目录已有不同的 ${style.path}，请选择其他存放目录。`);}
+    for(const style of styles){const full=contained(root,style.path);try{await fs.writeFile(full,style.bytes,{flag:'wx'});}catch(error){if((error as NodeJS.ErrnoException).code!=='EEXIST'||!(await fs.readFile(full)).equals(style.bytes))throw error;}}
+    await fs.writeFile(target,source,{flag:'wx'});return Project.openFile(target);
+  }
+  private async pendingDependencies(texts=this.history.texts){
+    const added:[string,DiskFile][]=[];if(this.scope!=='file')return added;
+    for(const file of await documentFiles(this.root,this.main,texts))if(!this.files.has(file)){
+      const bytes=await fs.readFile(contained(this.root,file)),bom=bytes.subarray(0,3).equals(Buffer.from([0xef,0xbb,0xbf]));let content:string|null=null,editable=false,encoding='binary';
+      if((sourceExtensions.has(path.extname(file).toLowerCase())||file===REVIEW_FILE)&&bytes.length<(file===REVIEW_FILE?20:5)*1024*1024)try{content=new TextDecoder('utf-8',{fatal:true}).decode(bytes);editable=true;encoding=bom?'UTF-8 BOM':'UTF-8';}catch{content=bytes.toString('utf8');encoding='非 UTF-8 · 只读';}
+      added.push([file,{info:{path:file,content,editable,dirty:false,encoding,size:bytes.length},bytes,bom,original:content}]);
+    }return added;
+  }
+  private addDependencies(added:[string,DiskFile][]){for(const [file,disk]of added){this.files.set(file,disk);if(disk.original!==null)this.history.texts.set(file,disk.original);this.version++;}}
+  async refreshDependencies(){this.addDependencies(await this.pendingDependencies());}
+  async sourceWithDependencies(file:string,text:string,version:number){this.assertVersion(version);const texts=new Map(this.history.texts);texts.set(file,text);const added=await this.pendingDependencies(texts);this.assertVersion(version);this.source(file,text,version);this.addDependencies(added);return this.state();}
+  async renameMain(value:string,version:number){
+    this.assertVersion(version);const name=texFileName(value),previous=this.main,next=path.posix.join(path.posix.dirname(previous),name);
+    if(next===previous)return this.state();
+    const source=contained(this.root,previous),target=contained(this.root,next),caseOnly=process.platform==='win32'&&source.toLowerCase()===target.toLowerCase();
+    if(!caseOnly&&await fs.lstat(target).catch(()=>null))throw new Error('这个文件名已存在，请使用其他名称。');
+    if(this.state().reviewError)throw new Error('请先修复审阅记录后再重命名。');
+    await this.save();
+    const remap=(text:string)=>{const store=readReviewStore(text);if(store.documents[previous]){if(store.documents[next]&&next!==previous)throw new Error('该名称已有审阅记录，请使用其他名称。');store.documents[next]=store.documents[previous];delete store.documents[previous];}return JSON.stringify(store);};
+    const beforeReview=this.history.texts.get(REVIEW_FILE),afterReview=beforeReview===undefined?undefined:remap(beforeReview),reviewPath=contained(this.root,REVIEW_FILE);
+    // Prepare history before any filesystem mutation, including every undo/redo state.
+    const prepared=this.history.clone();
+    if(beforeReview!==undefined)prepared.rewriteFile(REVIEW_FILE,remap);prepared.renameFile(previous,next);
+    let copied=false,reviewWritten=false;
+    const replace=async(file:string,bytes:Buffer|string)=>{const temporary=file+'.'+randomUUID()+'.tmp';await fs.writeFile(temporary,bytes,{flag:'wx'});try{await fs.rename(temporary,file);}finally{await fs.unlink(temporary).catch(()=>{});}};
+    try{
+      const actual=await fs.realpath(source),relative=path.relative(this.root,actual);
+      if(relative==='..'||relative.startsWith('..'+path.sep)||path.isAbsolute(relative)||!(await fs.readFile(source)).equals(this.files.get(previous)!.bytes))throw new Error('文件已被外部修改，请重新读取后再重命名。');
+      if(beforeReview!==undefined&&!(await fs.readFile(reviewPath)).equals(this.files.get(REVIEW_FILE)!.bytes))throw new Error('审阅记录已被外部修改，请重新读取后再重命名。');
+      if(!caseOnly){await fs.copyFile(source,target,fsConstants.COPYFILE_EXCL);copied=true;}
+      if(afterReview!==undefined&&afterReview!==beforeReview){await replace(reviewPath,afterReview);reviewWritten=true;}
+      if(caseOnly)await fs.rename(source,target);else await fs.unlink(source);
+    }catch(error){if(reviewWritten)await replace(reviewPath,this.files.get(REVIEW_FILE)!.bytes);if(copied)await fs.unlink(target).catch(()=>{});throw error;}
+    this.history.renameFile(previous,next);if(beforeReview!==undefined)this.history.rewriteFile(REVIEW_FILE,remap);
+    const disk=this.files.get(previous)!;this.files.delete(previous);disk.info.path=next;this.files.set(next,disk);
+    if(afterReview!==undefined){const review=this.files.get(REVIEW_FILE)!;review.bytes=Buffer.from(afterReview);review.original=afterReview;review.info.size=review.bytes.length;review.bom=false;}
+    this.reviewCache=undefined;this.main=next;this.version++;return this.state();
   }
   assertVersion(version: number) { if (version !== this.version) throw new Error('工程版本已变化，请刷新后重试。'); }
   prepareWritingLayout(){
     const state=this.state(),source=this.history.texts.get(this.main)??'';
     if(!canFlow(state)||!this.files.has('mogao.sty')||!source.includes('\\usepackage{mogao}'))return;
+    if(this.history.texts.get(LAYOUT_STYLE_FILE)===PREVIOUS_LAYOUT_STYLE){this.history.commit('更新分页样式',[minimalPatch(LAYOUT_STYLE_FILE,PREVIOUS_LAYOUT_STYLE,LAYOUT_STYLE)]);this.version++;}
     if(this.files.has(LAYOUT_STYLE_FILE)&&this.history.texts.get(LAYOUT_STYLE_FILE)!==LAYOUT_STYLE)return;
     if(!this.files.has(LAYOUT_STYLE_FILE))this.addFile(LAYOUT_STYLE_FILE,Buffer.from(LAYOUT_STYLE),'UTF-8',LAYOUT_STYLE);
     if(!source.includes('\\usepackage{pageweave-layout}')){this.history.commit('统一页面排版',[minimalPatch(this.main,source,source.replace('\\begin{document}','\\usepackage{pageweave-layout}\n\\begin{document}'))]);this.version++;}
@@ -81,7 +138,7 @@ export class Project {
     if(!canFlow(state)||this.history.texts.get(LAYOUT_STYLE_FILE)!==LAYOUT_STYLE)return state;
     const doc=flowDocument(state.writing);
     if(plan.source!==serializeRich(doc)||JSON.stringify(plan.layout)!==JSON.stringify(paperLayout(state)))return state;
-    const source=pagePlanSource(doc,state.writing,plan,this.capture().files),before=this.history.texts.get(PAGE_PLAN_FILE);
+    const source=pagePlanSource(doc,state.writing,plan,this.capture().files,state.main),before=this.history.texts.get(PAGE_PLAN_FILE);
     if(before!==source){if(!this.files.has(PAGE_PLAN_FILE))this.addFile(PAGE_PLAN_FILE,Buffer.from(source),'UTF-8',source);else this.history.texts.set(PAGE_PLAN_FILE,source);this.version++;}
     return this.state();
   }
@@ -90,9 +147,9 @@ export class Project {
       const content = this.history.texts.get(file) ?? null;
       return { ...disk.info, content, dirty: !!disk.pendingWrite || (disk.info.editable && content !== disk.original) };
     });
-    const state:ProjectState={ id: this.id, root: this.root, name: path.basename(this.root), main: this.main, engine: this.engine, version: this.version, files,
-      objects: files.filter(f => f.path.endsWith('.tex') && f.content !== null).flatMap(f => parseLatex(f.content!, f.path)),
-      writing:files.filter(f=>f.path.endsWith('.tex')&&f.content!==null).flatMap(f=>parseWriting(f.content!,f.path)),
+    const state:ProjectState={ id: this.id, root: this.root, name: path.basename(this.root), main: this.main, engine: this.engine, scope:this.scope,version: this.version, files,
+      objects: files.filter(f => /\.tex$/i.test(f.path) && f.content !== null).flatMap(f => parseLatex(f.content!, f.path)),
+      writing:files.filter(f=>/\.tex$/i.test(f.path)&&f.content!==null).flatMap(f=>parseWriting(f.content!,f.path)),
       canUndo: this.history.canUndo, canRedo: this.history.canRedo, undoLabel: this.history.undoLabel, redoLabel: this.history.redoLabel };
     try{const stored=this.reviewStore().documents[this.main];if(stored&&canFlow(state))state.reviewDocument=documentSource(stored)===documentSource(flowDocument(state.writing))?stored:relocateComments(stored,flowDocument(state.writing));}
     catch(error){state.reviewError=String(error instanceof Error?error.message:error);}
@@ -215,7 +272,7 @@ export class Project {
   undo(version: number) { this.assertVersion(version); if (this.history.undo()) this.version++; return this.state(); }
   redo(version: number) { this.assertVersion(version); if (this.history.redo()) this.version++; return this.state(); }
   configure(main: string, engine: Engine) {
-    if (!this.files.has(main) || !main.endsWith('.tex')) throw new Error('请选择工程内的 .tex 入口。');
+    if (!this.files.has(main) || !/\.tex$/i.test(main)) throw new Error('请选择工程内的 .tex 入口。');
     if (!['xelatex', 'pdflatex', 'lualatex'].includes(engine)) throw new Error('不支持的编译器。');
     if (this.main !== main || this.engine !== engine) { this.main = main; this.engine = engine; this.version++; }
     return this.state();
@@ -227,7 +284,7 @@ export class Project {
     return Buffer.concat([data.bom ? Buffer.from([0xef, 0xbb, 0xbf]) : Buffer.alloc(0), Buffer.from(this.history.texts.get(file)!, 'utf8')]);
   }
   capture():ProjectSnapshot {
-    return {root:this.root,main:this.main,engine:this.engine,files:[...this.files].map(([file,disk])=>({path:file,bytes:this.encode(file),baseline:disk.pendingWrite?null:disk.bytes}))};
+    return {root:this.root,main:this.main,engine:this.engine,scope:this.scope,files:[...this.files].map(([file,disk])=>({path:file,bytes:this.encode(file),baseline:disk.pendingWrite?null:disk.bytes}))};
   }
   async restore(snapshot:ProjectSnapshot){
     if(path.resolve(snapshot.root)!==this.root)throw new Error('恢复记录不属于当前工程。');
@@ -244,7 +301,7 @@ export class Project {
         this.files.get(file.path)!.bom=file.bytes.subarray(0,3).equals(Buffer.from([0xef,0xbb,0xbf]));
       }
     }
-    this.configure(snapshot.main,snapshot.engine);this.version++;
+    this.scope=snapshot.scope??'folder';this.configure(snapshot.main,snapshot.engine);this.version++;
     return this.state();
   }
   async save() {
@@ -290,6 +347,6 @@ export class Project {
     // are never overwritten by Save As.
     try{await fs.mkdir(target);}catch(error){if((error as NodeJS.ErrnoException).code==='EEXIST')throw new Error('这个位置已存在，请换一个名称。');throw error;}
     for(const [file,bytes]of contents){const full=contained(target,file);await fs.mkdir(path.dirname(full),{recursive:true});await fs.writeFile(full,bytes,{flag:'wx'});}
-    const next=await Project.open(target);next.configure(state.main,state.engine);return next;
+    const next=await Project.open(target,this.scope==='file'?state.main:undefined);next.configure(state.main,state.engine);return next;
   }
 }

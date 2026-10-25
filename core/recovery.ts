@@ -5,7 +5,7 @@ import {Project,contained,type ProjectSnapshot} from './project';
 import type {Engine,RecoveryInfo} from './types';
 
 interface RecordFile {path:string;blob:string;baseline:string|null;size:number}
-interface RecoveryRecord {format:1;id:string;root:string;main:string;engine:Engine;savedAt:string;files:RecordFile[]}
+interface RecoveryRecord {format:1;id:string;root:string;main:string;engine:Engine;scope?:'file'|'folder';savedAt:string;files:RecordFile[]}
 const sha=(bytes:Buffer|string)=>createHash('sha256').update(bytes).digest('hex');
 const digest=/^[a-f0-9]{64}$/;
 const canonicalRoot=(root:string)=>fs.realpath(root).catch(()=>path.resolve(root));
@@ -35,7 +35,7 @@ export class RecoveryStore {
         if(!await fs.stat(target).catch(()=>null))await atomicWrite(target,file.bytes);
         files.push({path:file.path,blob,baseline:file.baseline?this.hash(file.baseline):null,size:file.bytes.length});
       }
-      const record:RecoveryRecord={format:1,id:randomUUID(),root:snapshot.root,main:snapshot.main,engine:snapshot.engine,savedAt:new Date().toISOString(),files};
+      const record:RecoveryRecord={format:1,id:randomUUID(),root:snapshot.root,main:snapshot.main,engine:snapshot.engine,scope:snapshot.scope,savedAt:new Date().toISOString(),files};
       const current=path.join(folder,'current.json'),old=await fs.readFile(current).catch(()=>null);
       if(old)await atomicWrite(path.join(folder,'previous.json'),old);
       await atomicWrite(current,JSON.stringify(record));
@@ -64,7 +64,7 @@ export class RecoveryStore {
       if(name==='current.json'&&header.format===1&&header.cleared===true&&this.key(header.root)===this.key(root))return null;
       const record=this.parse(bytes,root),files:ProjectSnapshot['files']=[];
       for(const file of record.files){const bytes=await fs.readFile(path.join(folder,'objects',file.blob));if(bytes.length!==file.size||sha(bytes)!==file.blob)throw new Error('恢复内容校验失败。');files.push({path:file.path,bytes,baseline:null});}
-      return {record,snapshot:{root:record.root,main:record.main,engine:record.engine,files} as ProjectSnapshot};
+      return {record,snapshot:{root:record.root,main:record.main,engine:record.engine,scope:record.scope,files} as ProjectSnapshot};
     }catch{}
     return null;
   }
@@ -99,8 +99,8 @@ export class RecoveryStore {
     if(disk.conflict||!await fs.stat(root).catch(()=>null)){
       const target=path.join(this.directory,'recovered','文稿-'+Date.now()+'-'+randomUUID().slice(0,8));await fs.mkdir(target,{recursive:true});
       for(const file of saved.snapshot.files){const full=contained(target,file.path);await fs.mkdir(path.dirname(full),{recursive:true});await atomicWrite(full,file.bytes);}
-      project=await Project.open(target);project.configure(saved.snapshot.main,saved.snapshot.engine);await this.clear(root);
-    }else{project=await Project.open(root);await project.restore(saved.snapshot);await this.checkpoint(project);}
+      project=await Project.open(target,saved.snapshot.scope==='file'?saved.snapshot.main:undefined);project.configure(saved.snapshot.main,saved.snapshot.engine);await this.clear(root);
+    }else{project=await Project.open(root,saved.snapshot.scope==='file'?saved.snapshot.main:undefined);await project.restore(saved.snapshot);await this.checkpoint(project);}
     return project;
   }
 }

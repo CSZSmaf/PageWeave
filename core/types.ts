@@ -16,6 +16,7 @@ export interface ProjectFile {
 }
 export interface ProjectState {
   id: string; root: string; name: string; main: string; engine: Engine; version: number;
+  scope?:'file'|'folder';
   files: ProjectFile[]; objects: SemanticObject[]; canUndo: boolean; canRedo: boolean;
   undoLabel?: string; redoLabel?: string;
   writing: WritingBlock[];
@@ -38,7 +39,8 @@ export interface WorkbenchApi {
   aiCancel(id:string):Promise<void>;
   initialize(): Promise<{ project: ProjectState; tools: ToolInfo[] }>;
   resolveRecovery(id:string,action:'restore'|'discard'):Promise<ProjectState>;
-  open(): Promise<ProjectState | null>;
+  open(mode?:'file'|'folder'): Promise<ProjectState | null>;
+  renameDocument(name:string,version:number):Promise<ProjectState>;
   demo(): Promise<ProjectState | null>;
   writingDemo(): Promise<ProjectState | null>;
   newDocument(): Promise<ProjectState | null>;

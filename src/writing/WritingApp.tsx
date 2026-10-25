@@ -20,6 +20,9 @@ import ReviewPanel,{ReviewTools} from './ReviewPanel';
 import {selectedAnchor,reviewSnapshot,type CommentAnchor} from './Review';
 import {REVIEW_FILE,reviewLocked} from '../../core/review';
 import AiPanel from './AiPanel';
+import DocumentMenu from './DocumentMenu';
+import {documentFileName} from '../../core/file-name';
+import brandIcon from '../../assets/pageweave.png';
 
 const api=window.workbench;
 const textOf=(node:RichNode):string=>node.text??(node.attrs?.latex?String(node.attrs.latex):(node.content??[]).map(textOf).join(''));
@@ -35,6 +38,7 @@ function syncSelection(e:Editor){
 export default function WritingApp(){
   const [recovery,setRecovery]=useState<RecoveryInfo|null>(null),[recovering,setRecovering]=useState(false),[saveStatus,setSaveStatus]=useState<SaveStatus>('saved');
   const [aiOpen,setAiOpen]=useState(false);
+  const [openMenu,setOpenMenu]=useState(false);
   const [project,setProject]=useState<ProjectState|null>(null),[seed,setSeed]=useState<RichNode|null>(null),[preview,setPreview]=useState<CompileResult|null>(null),[last,setLast]=useState<CompileResult|null>(null);
   const [view,setView]=useState<'write'|'pdf'|'source'>('write'),[busy,setBusy]=useState(false),[pending,setPending]=useState(false),[pages,setPages]=useState(1),[pdfPages,setPdfPages]=useState(0),[zoom,setZoom]=useState(.95);
   const [navVisible,setNavVisible]=useState(false),[formulasVisible,setFormulasVisible]=useState(false),[math,setMath]=useState<MathRequest|null>(null),[exports,setExports]=useState(false),[saveMenu,setSaveMenu]=useState(false),[log,setLog]=useState(false),[message,setMessage]=useState(''),[error,setError]=useState(false),[,setTick]=useState(0);
@@ -53,7 +57,7 @@ export default function WritingApp(){
   const run=async(fn:()=>Promise<unknown>)=>{try{await fn();}catch(error){notify(error,true);}};
   const tick=()=>setTick(n=>n+1);
   const newComment=()=>{const e=editor.current;if(!e||project?.reviewError)return;syncSelection(e);const anchor=selectedAnchor(e);if(!anchor){notify('请先选择需要批注的文字。');return;}setAiOpen(false);setCommentAnchor(anchor);setReviewMode('comments');setReviewOpen(true);setRibbonTab('review');};
-  useEffect(()=>{const key=(event:KeyboardEvent)=>{if((event.ctrlKey||event.metaKey)&&event.altKey&&!event.shiftKey&&event.key.toLowerCase()==='m'&&!event.isComposing&&view==='write'&&!math&&!wordDialog&&!layout&&!tableDialog){event.preventDefault();newComment();}};window.addEventListener('keydown',key,true);return()=>window.removeEventListener('keydown',key,true);});
+  useEffect(()=>{const key=(event:KeyboardEvent)=>{if((event.target as Element)?.closest?.('.document-rename-dialog'))return;if((event.ctrlKey||event.metaKey)&&event.altKey&&!event.shiftKey&&event.key.toLowerCase()==='m'&&!event.isComposing&&view==='write'&&!math&&!wordDialog&&!layout&&!tableDialog){event.preventDefault();newComment();}};window.addEventListener('keydown',key,true);return()=>window.removeEventListener('keydown',key,true);});
   function load(next:ProjectState){
     if(next.recovery){session.current?.dispose();session.current=null;editor.current=null;setProject(null);setRecovery(next.recovery);setMessage('');setError(false);return;}
     setRecovery(null);setSaveStatus(next.files.some(file=>file.dirty)?'pending':'saved');
@@ -70,18 +74,18 @@ export default function WritingApp(){
   const capture=()=>{const e=editor.current;if(currentView.current!=='source'&&e&&!e.isDestroyed)session.current?.change(e.getJSON() as RichNode);};
   const save=()=>run(async()=>{capture();await session.current?.mutate(()=>api.save());notify('文稿已保存。');});
   const saveAs=()=>run(async()=>{if(switchingView.current||!session.current)return;const previous=session.current;switchingView.current=true;setSwitching(true);try{capture();await previous.idle();const next=await api.saveAs();if(next){load(next);notify('文稿已另存。');}}finally{if(session.current===previous)previous.resume();switchingView.current=false;setSwitching(false);}});
-  useEffect(()=>{if(!saveMenu&&!exports)return;const dismiss=(event:PointerEvent)=>{if(!(event.target as HTMLElement).closest('.export-wrap')){setSaveMenu(false);setExports(false);}};const escape=(event:KeyboardEvent)=>{if(event.key==='Escape'){setSaveMenu(false);setExports(false);}};window.addEventListener('pointerdown',dismiss);window.addEventListener('keydown',escape);return()=>{window.removeEventListener('pointerdown',dismiss);window.removeEventListener('keydown',escape);};},[saveMenu,exports]);
+  useEffect(()=>{if(!saveMenu&&!exports&&!openMenu)return;const dismiss=(event:PointerEvent)=>{if(!(event.target as HTMLElement).closest('.export-wrap')){setSaveMenu(false);setExports(false);setOpenMenu(false);}};const escape=(event:KeyboardEvent)=>{if(event.key==='Escape'){setSaveMenu(false);setExports(false);setOpenMenu(false);}};window.addEventListener('pointerdown',dismiss);window.addEventListener('keydown',escape);return()=>{window.removeEventListener('pointerdown',dismiss);window.removeEventListener('keydown',escape);};},[saveMenu,exports,openMenu]);
   useEffect(()=>api.onCloseRequest(()=>void run(async()=>{const previous=session.current;capture();await previous?.idle();try{await api.finishClose();}finally{if(session.current===previous)previous?.resume();}})),[]);
-  useEffect(()=>{const key=(event:KeyboardEvent)=>{
+  useEffect(()=>{const key=(event:KeyboardEvent)=>{if((event.target as Element)?.closest?.('.document-rename-dialog'))return;
     if(event.isComposing||!(event.ctrlKey||event.metaKey)||!event.shiftKey||event.altKey||event.key.toLowerCase()!=='s'||math||wordDialog||layout||tableDialog)return;
     event.preventDefault();event.stopPropagation();void saveAs();
   };window.addEventListener('keydown',key,true);return()=>window.removeEventListener('keydown',key,true);});
-  useEffect(()=>{const key=(event:KeyboardEvent)=>{
+  useEffect(()=>{const key=(event:KeyboardEvent)=>{if((event.target as Element)?.closest?.('.document-rename-dialog'))return;
     if(event.key==='Escape'&&!event.isComposing&&searchRequest&&!math&&!wordDialog&&!layout&&!tableDialog){event.preventDefault();event.stopPropagation();setSearchRequest(null);searchTarget?.focus();return;}
     if(event.isComposing||!(event.ctrlKey||event.metaKey)||event.altKey||view==='pdf'||math||wordDialog||layout||tableDialog)return;
     if(['f','h'].includes(event.key.toLowerCase())){event.preventDefault();event.stopPropagation();openSearch(event.key.toLowerCase()==='h'?'replace':'find');}
   };window.addEventListener('keydown',key,true);return()=>window.removeEventListener('keydown',key,true);});
-  useEffect(()=>{const key=(event:KeyboardEvent)=>{
+  useEffect(()=>{const key=(event:KeyboardEvent)=>{if((event.target as Element)?.closest?.('.document-rename-dialog'))return;
     if(!session.current||event.defaultPrevented||!(event.ctrlKey||event.metaKey))return;
     if(event.key.toLowerCase()==='s'){event.preventDefault();if(event.shiftKey)void saveAs();else void save();}
     if(currentView.current==='source')return;
@@ -89,7 +93,8 @@ export default function WritingApp(){
     if(!editor.current?.isFocused&&['z','y'].includes(event.key.toLowerCase())&&!math){event.preventDefault();history(event.key.toLowerCase()==='y'||event.shiftKey?'redo':'undo');}
   };window.addEventListener('keydown',key);return()=>window.removeEventListener('keydown',key);});
   const history=(kind:'undo'|'redo')=>{setView('write');editor.current?.chain().focus()[kind]().run();tick();};
-  const switchProject=(kind:'open'|'writingDemo'|'newDocument'|'reload')=>run(async()=>{if(switchingView.current||!session.current)return;const previous=session.current;switchingView.current=true;setSwitching(true);try{capture();await previous.idle();const next=await api[kind]();if(next)load(next);}finally{if(session.current===previous)previous.resume();switchingView.current=false;setSwitching(false);}});
+  const switchProject=(kind:'open'|'writingDemo'|'newDocument'|'reload',mode:'file'|'folder'='file')=>run(async()=>{if(switchingView.current||!session.current)return;const previous=session.current;switchingView.current=true;setSwitching(true);try{capture();await previous.idle();const next=await (kind==='open'?api.open(mode):api[kind]());if(next)load(next);}finally{if(session.current===previous)previous.resume();switchingView.current=false;setSwitching(false);}});
+  const renameDocument=async(name:string)=>{if(switchingView.current||!session.current)throw new Error('请稍后重试。');const previous=session.current,main=previous.project.main;switchingView.current=true;setSwitching(true);try{capture();await previous.idle();await previous.mutate(p=>api.renameDocument(name,p.version));if(sourceFile===main)setSourceFile(previous.project.main);}finally{previous.resume();switchingView.current=false;setSwitching(false);}};
   const changeView=(next:'write'|'pdf'|'source')=>run(async()=>{
     if(switchingView.current||next===currentView.current)return;
     switchingView.current=true;setSwitching(true);
@@ -142,23 +147,19 @@ export default function WritingApp(){
   useEffect(()=>{if(context!==previousContext.current){setRibbonTab(tab=>tab==='review'?tab:context as RibbonTab||'home');previousContext.current=context;}},[context]);
   const count=useMemo(()=>supported?countWords(documentText(view==='source'?flowDocument(project!.writing):e?.getJSON() as RichNode??seed??{type:'doc'})):null,[supported,view,project?.writing,e?.state.doc,seed]);
   const selectionCount=view==='write'&&e&&!e.state.selection.empty?countWords(documentText({type:'doc',content:e.state.doc.slice(e.state.selection.from,e.state.selection.to).content.toJSON()})).words:0;
-  const documentName=useMemo(()=>{
-    let title='';
-    if(view!=='source'&&e)e.state.doc.forEach(node=>{if(!title&&node.type.name==='heading')title=node.textContent;});
-    else{const heading=(project?.writing.flatMap(block=>block.content.content??[])??seed?.content)?.find(node=>node.type==='heading');if(heading)title=textOf(heading);}
-    return title?title.slice(0,40):project?.main&&project.main!=='main.tex'?project.main.replace(/\.tex$/i,''):'未命名文档';
-  },[view,project?.writing,project?.main,e?.state.doc,seed]);
+  const documentName=documentFileName(project?.main??'');
+  useEffect(()=>{document.title=project?documentName+' — PageWeave':'PageWeave';},[documentName,project?.id]);
   const activeSource=project?.files.find(f=>f.path===sourceFile);
   const selected=e?.state.selection.$from.parent.attrs.sourceId,dirty=pending||project?.files.some(f=>f.dirty);
   if(recovery)return <div className="modal-backdrop"><div className="modal recovery-dialog" role="dialog" aria-modal="true" aria-label="恢复文稿"><div className="modal-title"><h2>恢复未保存的文稿</h2></div><p>{recovery.name}</p><p>{new Date(recovery.savedAt).toLocaleString()}</p>{recovery.conflict&&<p>磁盘文件已更改，将恢复为独立副本。</p>}{error&&message&&<p className="formula-error" role="alert">{message}</p>}<div className="recovery-actions">{(['discard','restore'] as const).map(action=><button key={action} autoFocus={action==='restore'} disabled={recovering} className={action==='restore'?'primary-button':'outline-button'} onClick={()=>void run(async()=>{setRecovering(true);setMessage('');try{load(await api.resolveRecovery(recovery.id,action));if(action==='restore')notify('文稿已恢复。');}finally{setRecovering(false);}})}>{action==='discard'?'保留磁盘版本':recovering?'正在恢复…':recovery.conflict?'恢复副本':'恢复'}</button>)}</div></div></div>;
   if(!project)return <main className="startup-state" role={error?'alert':'status'}><h1>{error?'文稿未能打开':'正在打开文稿…'}</h1>{error&&<><p>{message}</p><button onClick={()=>location.reload()}>重新加载</button></>}</main>;
   return <div className="writer-shell" data-project-version={project?.version} data-preview-version={preview?.version} data-pending={pending} data-save-status={saveStatus}>
     <header className="writer-header">
-      <div className="brand"><div className="brand-mark"><FileText size={20}/></div><span>PageWeave</span></div>
-      <div className="writer-docname" title={project?.root}><strong>{documentName}</strong>{dirty&&<i className="document-dirty" title="未保存"/>}</div>
+      <div className="brand"><img className="brand-mark" src={brandIcon} alt=""/><span>PageWeave</span></div>
+      <DocumentMenu name={documentName} path={project.root+'/'+project.main} dirty={!!dirty} disabled={switching} onRename={renameDocument} onSaveAs={()=>void saveAs()} onReveal={()=>void run(()=>api.reveal())}/>
       {view!=='source'&&<nav className="ribbon-tabs" role="tablist" aria-label="功能区">{([['home','开始'],['insert','插入'],['layout','布局'],['review','审阅'],...(context?[[context,context==='image'?'图片':'表格']]:[])] as [RibbonTab,string][]).map(([tab,label])=><button key={tab} role="tab" aria-selected={ribbonTab===tab} className={ribbonTab===tab?'on':''} onMouseDown={ev=>ev.preventDefault()} onClick={()=>tab==='review'?void openReview('changes'):setRibbonTab(tab)}>{label}</button>)}</nav>}
       <div className="writer-header-actions">
-        <button className="quiet-button" disabled={busy||switching} onClick={()=>void switchProject('open')}><FolderOpen size={15}/>打开</button><button className="quiet-button" disabled={busy||switching} onClick={()=>void switchProject('newDocument')}><FilePlus2 size={15}/>新建</button>
+        <div className="export-wrap save-split"><button className="quiet-button" disabled={busy||switching} onClick={()=>void switchProject('open')}><FolderOpen size={15}/>打开</button><button className="quiet-button save-options" aria-label="更多打开选项" aria-expanded={openMenu} disabled={busy||switching} onClick={()=>{setSaveMenu(false);setExports(false);setOpenMenu(!openMenu);}}><ChevronDown size={12}/></button>{openMenu&&<div className="dropdown"><button onClick={()=>{setOpenMenu(false);void switchProject('open','file');}}>打开 .tex 文件</button><button onClick={()=>{setOpenMenu(false);void switchProject('open','folder');}}>打开工程文件夹</button></div>}</div><button className="quiet-button" disabled={busy||switching} onClick={()=>void switchProject('newDocument')}><FilePlus2 size={15}/>新建</button>
         <div className="export-wrap save-split"><button className="quiet-button" disabled={switching} onClick={()=>void save()}><Save size={15}/>保存</button><button className="quiet-button save-options" aria-label="更多保存选项" aria-expanded={saveMenu} onClick={()=>{setExports(false);setSaveMenu(!saveMenu);}}><ChevronDown size={12}/></button>{saveMenu&&<div className="dropdown"><button onClick={()=>{setSaveMenu(false);void saveAs();}}>另存为<span className="menu-shortcut">Ctrl+Shift+S</span></button></div>}</div>
         <div className="export-wrap"><button className="primary-button" onClick={()=>{setSaveMenu(false);setExports(!exports);}}><ArrowDownToLine size={15}/>导出<ChevronDown size={12}/></button>{exports&&<div className="dropdown">
           <button onClick={()=>{setExports(false);void run(async()=>{capture();const result=await session.current!.latest();const p=await api.exportPdf(result.token);if(p)notify('PDF 已导出：'+p);});}}>导出正式 PDF</button>
@@ -170,7 +171,7 @@ export default function WritingApp(){
     {view==='source'?<div className="writer-ribbon source-toolbar" role="toolbar" aria-label="源码编辑工具">
       <div className="tool-group"><button aria-label="源码撤销" title="撤销 · Ctrl+Z" disabled={!project?.canUndo&&!pending} onClick={()=>void sourceHistory('undo')}><Undo2 size={17}/></button><button aria-label="源码重做" title="重做 · Ctrl+Y" disabled={!project?.canRedo} onClick={()=>void sourceHistory('redo')}><Redo2 size={17}/></button></div>
       <div className="tool-group"><label>文件<select aria-label="源文件" value={sourceFile} onChange={event=>setSourceFile(event.target.value)}>{project?.files.filter(f=>f.path!==REVIEW_FILE&&f.path!=='pageweave-pages.tex').map(f=><option key={f.path} value={f.path}>{f.path}{f.dirty?' *':''}</option>)}</select></label></div>
-      <div className="tool-group"><label>主文件<select aria-label="主文件" value={project?.main} onChange={event=>{const file=event.target.value;void run(()=>session.current!.mutate(p=>api.configure(file,p.engine)));}}>{project?.files.filter(f=>f.path.endsWith('.tex')&&f.path!=='pageweave-pages.tex').map(f=><option key={f.path}>{f.path}</option>)}</select></label><select aria-label="编译器" value={project?.engine} onChange={event=>{const engine=event.target.value as Engine;void run(()=>session.current!.mutate(p=>api.configure(p.main,engine)));}}><option value="xelatex">XeLaTeX</option><option value="pdflatex">pdfLaTeX</option><option value="lualatex">LuaLaTeX</option></select></div>
+      <div className="tool-group"><label>主文件<select aria-label="主文件" value={project?.main} onChange={event=>{const file=event.target.value;void run(()=>session.current!.mutate(p=>api.configure(file,p.engine)));}}>{project?.files.filter(f=>/\.tex$/i.test(f.path)&&f.path!=='pageweave-pages.tex').map(f=><option key={f.path}>{f.path}</option>)}</select></label><select aria-label="编译器" value={project?.engine} onChange={event=>{const engine=event.target.value as Engine;void run(()=>session.current!.mutate(p=>api.configure(p.main,engine)));}}><option value="xelatex">XeLaTeX</option><option value="pdflatex">pdfLaTeX</option><option value="lualatex">LuaLaTeX</option></select></div>
       <button disabled={busy} onClick={()=>void compileSource()}><RefreshCw size={16}/><span>重新排版</span></button><button onClick={()=>void run(()=>api.reveal())}><FolderOpen size={16}/><span>工程文件夹</span></button><button disabled={busy} onClick={()=>void switchProject('reload')}>重新读取</button><div className="ribbon-search"><button aria-label="查找与替换" title="查找 · Ctrl+F / 替换 · Ctrl+H" disabled={!sourceSearch} onClick={()=>openSearch('find')}><Search size={17}/><span>查找</span></button></div>
     </div>:<WritingToolbar editor={e} enabled={enabled} tab={ribbonTab} reviewTools={<ReviewTools editor={e} enabled={enabled&&view==='write'} onComment={newComment} onPanel={mode=>void openReview(mode)} onError={error=>notify(error,true)}/>}  format={format} history={history} onMath={equation} onImage={()=>imageInput.current?.click()} onTable={()=>setTableDialog(true)} onLayout={openLayout} onFormulas={()=>setFormulasVisible(true)} onOutline={()=>setNavVisible(!navVisible)} onSearch={()=>{if(view==='pdf')void changeView('write');openSearch('find');}}/>}
     {view==='source'&&sourceReviewLocked&&sourceFile===project?.main&&<div className="source-review-notice"><span>关闭修订并处理待审修改后，可编辑正文源码。</span><button onClick={()=>void openReview('changes')}>返回审阅</button></div>}

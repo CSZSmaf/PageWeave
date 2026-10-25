@@ -64,7 +64,7 @@ export class Compiler {
         build = await run(state.engine, args, dir);
         if (build.code === 0) { const second = await run(state.engine, args, dir); build = {code: second.code, output: build.output + '\n' + second.output}; }
       }
-      const pdf = path.join(dir, 'out', path.basename(state.main, '.tex') + '.pdf');
+      const pdf = path.join(dir, 'out', path.basename(state.main).replace(/\.tex$/i,'') + '.pdf');
       const ok = build.code === 0 && await fs.stat(pdf).then(s => s.size > 0).catch(() => false);
       const regions: Region[] = [];
       if (ok) {
@@ -80,7 +80,7 @@ export class Compiler {
         }
         this.builds.set(token, { dir, pdf, projectId: state.id, version: state.version });
       }
-      const aux=await fs.readFile(path.join(dir,'out',path.basename(state.main,'.tex')+'.aux'),'utf8').catch(()=>'');
+      const aux=await fs.readFile(path.join(dir,'out',path.basename(state.main).replace(/\.tex$/i,'')+'.aux'),'utf8').catch(()=>'');
       return { ok, projectId: state.id, version: state.version, token, durationMs: Date.now() - started, log: build.output,
         diagnostics: diagnostics(build.output, dir), regions, writingRegions:parseWritingPositions(aux), pdf: ok ? new Uint8Array(await fs.readFile(pdf)) : undefined };
   }

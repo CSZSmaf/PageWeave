@@ -54,8 +54,8 @@ npm run dev
 
 `npm run package` 生成 Windows 目录版，输出到 `release/win-unpacked/`。
 
-## 版权
+## 版权与许可
 
-Copyright © 2026 [CSZSmaf](https://github.com/CSZSmaf)。版权所有，详见 [版权声明](COPYRIGHT)。
+Copyright © 2026 [CSZSmaf](https://github.com/CSZSmaf)。项目采用 [Apache-2.0](LICENSE)，署名与适用范围见 [版权声明](COPYRIGHT)。
 
 第三方组件遵循各自的许可证，见 [第三方许可](THIRD_PARTY_NOTICES.txt)。

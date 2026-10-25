@@ -21,6 +21,7 @@ export interface ProjectState {
   writing: WritingBlock[];
   reviewDocument?:RichNode;
   reviewError?:string;
+  recovery?:RecoveryInfo|null;
 }
 export interface Region { objectId: string; file: string; line: number; page: number; x: number; y: number; width: number; height: number }
 export interface Diagnostic { file?: string; line?: number; message: string }
@@ -29,14 +30,21 @@ export interface CompileResult {
   log: string; diagnostics: Diagnostic[]; regions: Region[]; writingRegions: WritingRegion[]; pdf?: Uint8Array;
 }
 export interface ToolInfo { name: string; available: boolean; detail: string }
+export interface RecoveryInfo {id:string;name:string;savedAt:string;conflict:boolean}
 export interface WorkbenchApi {
+  aiStatus():Promise<import('./ai').AiStatus>;
+  aiConfigure(config:import('./ai').AiConfig,key?:string):Promise<import('./ai').AiStatus>;
+  aiRequest(request:import('./ai').AiRequest):Promise<import('./ai').AiReply>;
+  aiCancel(id:string):Promise<void>;
   initialize(): Promise<{ project: ProjectState; tools: ToolInfo[] }>;
+  resolveRecovery(id:string,action:'restore'|'discard'):Promise<ProjectState>;
   open(): Promise<ProjectState | null>;
   demo(): Promise<ProjectState | null>;
   writingDemo(): Promise<ProjectState | null>;
   newDocument(): Promise<ProjectState | null>;
   writeBlock(id:string,content:RichNode,version:number):Promise<ProjectState>;
   writeFlow(parts:import('./flow').FlowPart[],version:number,document?:RichNode):Promise<ProjectState>;
+  pagePlan(plan:import('./page-plan').PagePlan,version:number):Promise<ProjectState>;
   importImage(bytes:Uint8Array,version:number):Promise<{project:ProjectState;src:string;naturalWidth:number;naturalHeight:number}>;
   imageData(file:string):Promise<string>;
   insertBlock(afterId:string|null,kind:'paragraph'|'equation'|'pageBreak',version:number):Promise<{project:ProjectState;id:string}>;
@@ -47,6 +55,7 @@ export interface WorkbenchApi {
   undo(version: number): Promise<ProjectState>;
   redo(version: number): Promise<ProjectState>;
   save(): Promise<ProjectState>;
+  autoSave():Promise<ProjectState>;
   saveAs(): Promise<ProjectState|null>;
   reload(): Promise<ProjectState | null>;
   configure(main: string, engine: Engine): Promise<ProjectState>;

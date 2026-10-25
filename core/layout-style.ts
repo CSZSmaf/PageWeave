@@ -1,0 +1,34 @@
+export const LAYOUT_STYLE_FILE='pageweave-layout.sty';
+export const LAYOUT_STYLE=String.raw`\NeedsTeXFormat{LaTeX2e}
+\ProvidesPackage{pageweave-layout}[2026/10/25 PageWeave page metrics]
+\RequirePackage{etoolbox}
+\RequirePackage{pdftexcmds}
+\makeatletter
+\newif\ifPageWeavePlanValid
+\newsavebox{\PageWeaveCellBox}
+\newcommand{\PageWeaveCheckFile}[2]{\ifnum\pdf@strcmp{\pdf@filemdfivesum{#1}}{#2}=0\else\global\PageWeavePlanValidfalse\fi}
+\newcommand{\PageWeaveBreak}{\par\newpage}
+\newcommand{\PageWeaveTableBreak}{\noalign{\penalty-10000}}
+\edef\PageWeaveBaseSize{\f@size}
+\def\PageWeaveSpacing{1.5}
+\def\PageWeaveParagraphSkip{8bp}
+\newcommand{\PageWeaveFont}[2]{\@tempdima=#1bp\relax\@tempdimb=#2\@tempdima\edef\PageWeaveSelect{\noexpand\fontsize{\the\@tempdima}{\the\@tempdimb}}\PageWeaveSelect\selectfont}
+\newcommand{\PageWeaveStrut}{\vrule width0pt height.7\baselineskip depth.3\baselineskip\relax}
+\newcommand{\PageWeaveParaPart}[4]{\par\begingroup\def\PageWeaveSpacing{#2}\PageWeaveFont{\PageWeaveBaseSize}{#2}\csname MogaoAlign#1\endcsname\noindent\MogaoStart\PageWeaveStrut #4\PageWeaveStrut\par\endgroup\ifnum#3=1\addvspace{\PageWeaveParagraphSkip}\fi}
+\newcommand{\PageWeaveHeadingPart}[4]{\par\begingroup\bfseries\color[HTML]{2463C7}\ifnum#1=1\PageWeaveFont{22}{1.5}\else\ifnum#1=2\PageWeaveFont{17}{1.5}\else\PageWeaveFont{14}{1.5}\fi\fi\csname MogaoAlign#2\endcsname\noindent\MogaoStart\PageWeaveStrut #4\PageWeaveStrut\par\endgroup\ifnum#3=1\addvspace{8bp}\fi}
+\AtBeginDocument{
+  \linespread{1}\PageWeaveFont{\PageWeaveBaseSize}{1.5}\setlength{\parskip}{0pt}\setlength{\parindent}{0pt}
+  \clubpenalty=0\widowpenalty=0\displaywidowpenalty=0\hyphenpenalty=10000\raggedbottom
+  \renewcommand{\MogaoBlock}[2]{\par\begingroup\def\MogaoId{#1}\global\MogaoMarkedfalse\ifPageWeavePlanValid\ifcsdef{PageWeaveLayout@#1}{\csuse{PageWeaveLayout@#1}}{#2}\else#2\fi\par\zsavepos{mg-#1-end}\endgroup}
+  \renewcommand{\MogaoPara}[3]{\PageWeaveParaPart{#1}{#2}{1}{#3}}
+  \renewcommand{\MogaoHeading}[3]{\PageWeaveHeadingPart{#1}{#2}{1}{#3}}
+  \renewcommand{\MogaoText}[4]{\begingroup\ifstrempty{#1}{}{\IfFontExistsTF{#1}{\fontspec[AutoFakeBold=2.5,AutoFakeSlant=.2]{#1}}{}\ifboolexpr{test {\ifstrequal{#1}{SimSun}} or test {\ifstrequal{#1}{SimHei}} or test {\ifstrequal{#1}{Microsoft YaHei}} or test {\ifstrequal{#1}{KaiTi}} or test {\ifstrequal{#1}{FangSong}}}{\CJKfontspec[AutoFakeBold=2.5,AutoFakeSlant=.2]{#1}}{}}\ifstrempty{#2}{}{\PageWeaveFont{#2}{\PageWeaveSpacing}\PageWeaveStrut}\ifstrempty{#3}{}{\color[HTML]{#3}}#4\endgroup}
+  \ifcsdef{PageWeaveList}{\renewcommand{\PageWeaveList}[3]{\begingroup\def\PageWeaveParagraphSkip{0bp}\ifstrequal{#1}{ordered}{\begin{PWNumber}[start=#2,leftmargin=1.8em,topsep=3bp,itemsep=3bp,parsep=0pt]#3\end{PWNumber}}{\begin{PWBullet}[leftmargin=1.8em,topsep=3bp,itemsep=3bp,parsep=0pt]#3\end{PWBullet}}\endgroup}}{}
+  \ifcsdef{MogaoTable}{
+    \renewcommand{\MogaoTable}[2]{\par\begingroup\setlength{\tabcolsep}{6.75bp}\setlength{\arrayrulewidth}{.75bp}\setlength{\LTpre}{10bp}\setlength{\LTpost}{10bp}\renewcommand{\arraystretch}{0}\MogaoStart\begin{longtable}{|*{#1}{>{\raggedright\arraybackslash}p{\dimexpr(\linewidth-2\tabcolsep*#1-\arrayrulewidth*(#1+1))/#1\relax}|}}\hline#2\end{longtable}\endgroup}
+    \renewcommand{\MogaoCell}[2]{\begingroup\setbox\PageWeaveCellBox=\vtop{\def\PageWeaveParagraphSkip{0bp}\ifnum#1=1\bfseries\fi#2\par}\leavevmode\vrule width0pt height\dimexpr\ht\PageWeaveCellBox+5.25bp\relax depth\dimexpr\dp\PageWeaveCellBox+5.25bp\relax\box\PageWeaveCellBox\endgroup}
+  }{}
+  \PageWeavePlanValidtrue\InputIfFileExists{pageweave-pages.tex}{}{\PageWeavePlanValidfalse}
+}
+\makeatother
+`;

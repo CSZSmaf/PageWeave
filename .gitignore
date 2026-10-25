@@ -17,6 +17,8 @@ papers/
 builds/
 formula-builds/
 preferences.json
+ai-config.json
+recovery/
 *.local
 .DS_Store
 Thumbs.db

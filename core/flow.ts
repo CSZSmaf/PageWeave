@@ -2,7 +2,7 @@ import type {ProjectState} from './types';
 import type {RichNode,WritingBlock} from './writing';
 
 export interface FlowPart {id:string;content:RichNode}
-export interface PaperLayout {width:number;height:number;margin:number}
+export interface PaperLayout {width:number;height:number;margin:number;fontSize?:number;fontFamily?:string;cjkFont?:string}
 const whitespace=(text:string)=>text.replace(/%[^\r\n]*/g,'').trim()==='';
 
 // Only join a document whose entire body is represented by editable writing blocks.
@@ -41,5 +41,7 @@ export function paperLayout(project:ProjectState):PaperLayout{
   let [width,height]=name==='a5paper'?[148,210]:name==='letterpaper'?[215.9,279.4]:[210,297];
   if(/\blandscape\b/.test(options))[width,height]=[height,width];
   const px=96/25.4,margin=Number(/margin\s*=\s*([\d.]+)mm/.exec(options)?.[1]??25);
-  return {width:width*px,height:height*px,margin:margin*px};
+  const fontSize=Number(/\\documentclass\[([^\]]*)\]/.exec(text)?.[1].match(/\b(10|11|12)pt\b/)?.[1]??12);
+  const fontFamily=/\\setmainfont(?:\[[^\]]*\])?\{([^}]+)\}/.exec(text)?.[1]??'Times New Roman',cjkFont=/\\setCJKmainfont(?:\[[^\]]*\])?\{([^}]+)\}/.exec(text)?.[1]??'SimSun';
+  return {width:width*px,height:height*px,margin:margin*px,fontSize,fontFamily,cjkFont};
 }

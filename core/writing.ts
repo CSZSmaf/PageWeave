@@ -16,7 +16,7 @@ const special:Record<string,string>={'\\':'\\textbackslash{}','{':'\\{','}':'\\}
 export function escapeText(text:string){return text.replace(/[\\{}$%&#_~^]/g,c=>special[c]);}
 function num(value:unknown,fallback:number,min:number,max:number){const n=Number.parseFloat(String(value??fallback));return Number.isFinite(n)?Math.max(min,Math.min(max,n)):fallback;}
 function imagePath(value:unknown){const path=String(value??'');if(!/^[a-zA-Z0-9_./ -]+\.(png|jpe?g)$/i.test(path)||path.startsWith('/')||path.split('/').includes('..'))throw new Error('无效的工程图片路径。');return path;}
-function serializeInline(node:RichNode):string{
+export function serializeInline(node:RichNode):string{
   if(node.type==='hardBreak')return '\\MogaoLineBreak{}';
   if(node.type==='inlineMath')return `\\MogaoInlineMath{${node.attrs?.latex??''}}`;
   if(node.type!=='text')throw new Error('不支持的正文结构：'+node.type);

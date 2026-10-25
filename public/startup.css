@@ -1,0 +1,4 @@
+html,body{margin:0;background:#f2f5f9;color:#22334e;font-family:"Segoe UI","Microsoft YaHei",sans-serif}
+.startup-state{min-height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;box-sizing:border-box;padding:32px;gap:16px;text-align:center}
+.startup-state h1{font-size:20px;font-weight:500;margin:0}.startup-state p{font-size:14px;margin:0}
+.startup-state button{border:0;border-radius:6px;background:#2463c7;color:white;font:inherit;padding:9px 22px;cursor:pointer}.startup-state button[hidden]{display:none}

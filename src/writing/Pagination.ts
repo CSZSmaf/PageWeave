@@ -3,6 +3,8 @@ import {Plugin,PluginKey} from '@tiptap/pm/state';
 import {Decoration,DecorationSet,type EditorView} from '@tiptap/pm/view';
 import type {Node as PMNode} from '@tiptap/pm/model';
 import type {PaperLayout} from '../../core/flow';
+import type {PagePlan} from '../../core/page-plan';
+import {serializeRich} from '../../core/writing';
 
 export const PAGE_GAP=28;
 export const paginationKey=new PluginKey<DecorationSet>('writingPagination');
@@ -49,6 +51,8 @@ function paginate(view:EditorView,layout:PaperLayout){
   Object.assign(mirror.style,{position:'absolute',left:'-100000px',top:'0',width:`${layout.width-2*layout.margin}px`,visibility:'hidden',pointerEvents:'none'});
   mirror.contentEditable='false';
   mirror.style.setProperty('--image-max-height',`${(layout.height-2*layout.margin)*.82}px`);
+  mirror.style.setProperty('--writing-font-size',`${layout.fontSize??12}pt`);
+  mirror.style.setProperty('--writing-font-family',`"${layout.fontFamily??'Times New Roman'}","${layout.cjkFont??'SimSun'}",serif`);
   const entries:{element:HTMLElement;node:PMNode;pos:number}[]=[];
   view.state.doc.forEach((node,pos)=>{
     const real=view.nodeDOM(pos);if(!(real instanceof HTMLElement))return;
@@ -81,11 +85,11 @@ function paginate(view:EditorView,layout:PaperLayout){
     }
   }finally{mirror.remove();}
   const body=layout.height-2*layout.margin,stride=layout.height+PAGE_GAP;
-  let added=0,page=0;const decorations:Decoration[]=[];
+  let added=0,page=0;const decorations:Decoration[]=[],breaks:number[]=[];
   for(const unit of units){
     const top=unit.top+added,bottom=unit.bottom+added,pageStart=page*stride;
     if((unit.manual&&top>pageStart+.5)||(!unit.manual&&bottom>pageStart+body+.5&&top>pageStart+.5)){
-      page++;const height=page*stride-top;added+=height;
+      page++;breaks.push(unit.pos);const height=page*stride-top;added+=height;
       const inline=view.state.doc.resolve(unit.pos).parent.isTextblock,number=page;
       decorations.push(Decoration.widget(unit.pos,()=>{
         const gap=document.createElement(unit.columns?'tr':inline?'span':'div');
@@ -97,10 +101,10 @@ function paginate(view:EditorView,layout:PaperLayout){
       },{side:-1,key:`page-${page}-${unit.pos}-${height.toFixed(2)}`,ignoreSelection:true,stopEvent:()=>true}));
     }
   }
-  return {decorations:DecorationSet.create(view.state.doc,decorations),pages:page+1};
+  return {decorations:DecorationSet.create(view.state.doc,decorations),pages:page+1,breaks};
 }
 
-export function pagination(getLayout:()=>PaperLayout,onPages:(pages:number)=>void){
+export function pagination(getLayout:()=>PaperLayout,onPages:(pages:number)=>void,onPlan?:(plan:PagePlan)=>void){
   return Extension.create({name:'continuousPagination',addProseMirrorPlugins(){return [new Plugin({
     key:paginationKey,
     state:{init:()=>DecorationSet.empty,apply:(tr,value)=>tr.getMeta(paginationKey)??value.map(tr.mapping,tr.doc)},
@@ -113,12 +117,13 @@ export function pagination(getLayout:()=>PaperLayout,onPages:(pages:number)=>voi
         const result=paginate(view,getLayout());lastLayout=JSON.stringify(getLayout());
         view.dispatch(view.state.tr.setMeta(paginationKey,result.decorations).setMeta('addToHistory',false));
         onPages(result.pages);
+        onPlan?.({source:serializeRich(view.state.doc.toJSON()),layout:getLayout(),breaks:result.breaks});
         // Reflow can move the active line to a new sheet without a document transaction.
         // Ask ProseMirror to keep that caret visible, without touching selection or focus.
         if(view.hasFocus()&&view.state.selection.empty)view.dispatch(view.state.tr.scrollIntoView().setMeta('addToHistory',false));
       });};
       schedule();document.fonts.ready.then(()=>{if(!disposed)schedule();});
-      return {update(next,previous){if(next.state.doc!==previous.doc||lastLayout!==JSON.stringify(getLayout()))schedule();},destroy(){disposed=true;cancelAnimationFrame(frame);clearTimeout(timer);}};
+      return {update(next,previous){if(!next.state.doc.content.eq(previous.doc.content)||lastLayout!==JSON.stringify(getLayout()))schedule();},destroy(){disposed=true;cancelAnimationFrame(frame);clearTimeout(timer);}};
     },
   })];}});
 }

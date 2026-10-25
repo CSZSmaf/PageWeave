@@ -1,13 +1,19 @@
 import { contextBridge, ipcRenderer } from 'electron';
 import type { WorkbenchApi } from '../core/types';
 const api: WorkbenchApi = {
+  aiStatus:()=>ipcRenderer.invoke('ai:status'),
+  aiConfigure:(config,key)=>ipcRenderer.invoke('ai:configure',config,key),
+  aiRequest:request=>ipcRenderer.invoke('ai:request',request),
+  aiCancel:id=>ipcRenderer.invoke('ai:cancel',id),
   initialize: () => ipcRenderer.invoke('project:initialize'),
+  resolveRecovery:(id,action)=>ipcRenderer.invoke('project:recover',id,action),
   open: () => ipcRenderer.invoke('project:open'),
   demo: () => ipcRenderer.invoke('project:demo'),
   writingDemo:()=>ipcRenderer.invoke('writing:demo'),
   newDocument:()=>ipcRenderer.invoke('writing:new'),
   writeBlock:(id,content,version)=>ipcRenderer.invoke('writing:edit',id,content,version),
   writeFlow:(parts,version,document)=>ipcRenderer.invoke('writing:flow',parts,version,document),
+  pagePlan:(plan,version)=>ipcRenderer.invoke('writing:plan',plan,version),
   importImage:(bytes,version)=>ipcRenderer.invoke('writing:import-image',bytes,version),
   imageData:file=>ipcRenderer.invoke('writing:image-data',file),
   insertBlock:(id,kind,version)=>ipcRenderer.invoke('writing:insert',id,kind,version),
@@ -18,6 +24,7 @@ const api: WorkbenchApi = {
   undo: version => ipcRenderer.invoke('project:undo', version),
   redo: version => ipcRenderer.invoke('project:redo', version),
   save: () => ipcRenderer.invoke('project:save'),
+  autoSave:()=>ipcRenderer.invoke('project:auto-save'),
   saveAs: () => ipcRenderer.invoke('project:save-as'),
   reload: () => ipcRenderer.invoke('project:reload'),
   configure: (main, engine) => ipcRenderer.invoke('project:configure', main, engine),

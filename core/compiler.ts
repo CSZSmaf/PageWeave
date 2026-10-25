@@ -43,13 +43,15 @@ function syncBlocks(output: string) {
 }
 export class Compiler {
   private builds = new Map<string, { dir: string; pdf: string; projectId: string; version: number }>();
-  private busy = false;
+  private active:{id:string;version:number;promise:Promise<CompileResult>}|null=null;
   constructor(readonly cacheRoot: string) {}
-  async compile(project: Project): Promise<CompileResult> {
-    if (this.busy) throw new Error('正在编译，请等待本次构建完成。');
-    this.busy = true;
+  compile(project: Project): Promise<CompileResult> {
+    if(this.active?.id===project.id&&this.active.version===project.version)return this.active.promise;
+    const previous=this.active?.promise,job={id:project.id,version:project.version,promise:Promise.resolve(null as unknown as CompileResult)};
+    job.promise=(previous?previous.catch(()=>{}):Promise.resolve()).then(()=>this.performCompile(project)).finally(()=>{if(this.active===job)this.active=null;});this.active=job;return job.promise;
+  }
+  private async performCompile(project: Project): Promise<CompileResult> {
     const token = randomUUID(), started = Date.now(), dir = path.join(this.cacheRoot, token);
-    try {
       const state = await project.snapshot(dir);
       await fs.mkdir(path.join(dir, 'out'), { recursive: true });
       const latexmk = await run('latexmk', ['-v'], undefined, 8000);
@@ -81,7 +83,6 @@ export class Compiler {
       const aux=await fs.readFile(path.join(dir,'out',path.basename(state.main,'.tex')+'.aux'),'utf8').catch(()=>'');
       return { ok, projectId: state.id, version: state.version, token, durationMs: Date.now() - started, log: build.output,
         diagnostics: diagnostics(build.output, dir), regions, writingRegions:parseWritingPositions(aux), pdf: ok ? new Uint8Array(await fs.readFile(pdf)) : undefined };
-    } finally { this.busy = false; }
   }
   async locate(token: string, page: number, x: number, y: number) {
     const build = this.builds.get(token); if (!build) throw new Error('预览已失效，请重新编译。');

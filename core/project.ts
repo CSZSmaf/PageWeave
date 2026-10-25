@@ -5,15 +5,18 @@ import { TextHistory, minimalPatch } from './history';
 import { parseLatex, widthReplacement } from './parser';
 import type { Engine, ProjectState, ProjectFile } from './types';
 import { parseWriting, serializeRich, blockSource, type RichNode } from './writing';
-import {canFlow,flowDocument,type FlowPart} from './flow';
+import {canFlow,flowDocument,paperLayout,type FlowPart} from './flow';
 import {WRITING_TOOLS_STYLE} from './writing-tools';
 import {LIST_STYLE,LIST_STYLE_FILE} from './lists';
 import {REVIEW_FILE,readReviewStore,validateReviewDocument,documentSource,reviewData,reviewLocked,relocateComments,type ReviewStore} from './review';
+import {LAYOUT_STYLE,LAYOUT_STYLE_FILE} from './layout-style';
+import {PAGE_PLAN_FILE,pagePlanSource,type PagePlan} from './page-plan';
 
 const sourceExtensions = new Set(['.tex', '.bib', '.sty', '.cls', '.txt', '.md', '.bst', '.cfg']);
-const excludedDirectories = new Set(['node_modules', '.git', '.tex-workbench', 'dist', 'dist-electron', 'release']);
+const excludedDirectories = new Set(['node_modules', '.git', '.tex-workbench', 'dist', 'dist-electron', 'release','recovery']);
 const buildFile = /\.(aux|log|toc|out|fls|fdb_latexmk|xdv|synctex(?:\.gz)?|nav|snm|vrb)$/i;
 interface DiskFile { info: ProjectFile; bytes: Buffer; bom: boolean; original: string | null; pendingWrite?:boolean }
+export interface ProjectSnapshot {root:string;main:string;engine:Engine;files:{path:string;bytes:Buffer;baseline:Buffer|null}[]}
 export function contained(root: string, relative: string) {
   if (path.isAbsolute(relative)) throw new Error('仅允许访问当前工程内的相对路径。');
   const target = path.resolve(root, relative), rel = path.relative(root, target);
@@ -28,7 +31,7 @@ export async function inventory(root: string): Promise<string[]> {
       if (entry.isSymbolicLink()) continue;
       const rel = path.join(relative, entry.name);
       if (entry.isDirectory()) { if (!excludedDirectories.has(entry.name) && !entry.name.startsWith('.')) await walk(rel); }
-      else if (entry.isFile() && !buildFile.test(entry.name) && !entry.name.startsWith('.')) {
+      else if (entry.isFile() && !buildFile.test(entry.name) && !entry.name.startsWith('.') && entry.name!=='ai-config.json') {
         const info = await fs.stat(path.join(root, rel)); bytes += info.size;
         if (result.length >= 3000 || bytes > 300 * 1024 * 1024) throw new Error('工程支持最多 3000 个文件、总计 300 MB 的工程，请选择论文工程子目录。');
         result.push(rel.replaceAll(path.sep, '/'));
@@ -66,6 +69,22 @@ export class Project {
     return p;
   }
   assertVersion(version: number) { if (version !== this.version) throw new Error('工程版本已变化，请刷新后重试。'); }
+  prepareWritingLayout(){
+    const state=this.state(),source=this.history.texts.get(this.main)??'';
+    if(!canFlow(state)||!this.files.has('mogao.sty')||!source.includes('\\usepackage{mogao}'))return;
+    if(this.files.has(LAYOUT_STYLE_FILE)&&this.history.texts.get(LAYOUT_STYLE_FILE)!==LAYOUT_STYLE)return;
+    if(!this.files.has(LAYOUT_STYLE_FILE))this.addFile(LAYOUT_STYLE_FILE,Buffer.from(LAYOUT_STYLE),'UTF-8',LAYOUT_STYLE);
+    if(!source.includes('\\usepackage{pageweave-layout}')){this.history.commit('统一页面排版',[minimalPatch(this.main,source,source.replace('\\begin{document}','\\usepackage{pageweave-layout}\n\\begin{document}'))]);this.version++;}
+  }
+  pagePlan(plan:PagePlan,version:number){
+    this.assertVersion(version);const state=this.state();
+    if(!canFlow(state)||this.history.texts.get(LAYOUT_STYLE_FILE)!==LAYOUT_STYLE)return state;
+    const doc=flowDocument(state.writing);
+    if(plan.source!==serializeRich(doc)||JSON.stringify(plan.layout)!==JSON.stringify(paperLayout(state)))return state;
+    const source=pagePlanSource(doc,state.writing,plan,this.capture().files),before=this.history.texts.get(PAGE_PLAN_FILE);
+    if(before!==source){if(!this.files.has(PAGE_PLAN_FILE))this.addFile(PAGE_PLAN_FILE,Buffer.from(source),'UTF-8',source);else this.history.texts.set(PAGE_PLAN_FILE,source);this.version++;}
+    return this.state();
+  }
   state(): ProjectState {
     const files = [...this.files].map(([file, disk]) => {
       const content = this.history.texts.get(file) ?? null;
@@ -204,7 +223,29 @@ export class Project {
   private encode(file: string) {
     const data = this.files.get(file)!;
     if (!data.info.editable) return data.bytes;
+    if(this.history.texts.get(file)===data.original)return data.bytes;
     return Buffer.concat([data.bom ? Buffer.from([0xef, 0xbb, 0xbf]) : Buffer.alloc(0), Buffer.from(this.history.texts.get(file)!, 'utf8')]);
+  }
+  capture():ProjectSnapshot {
+    return {root:this.root,main:this.main,engine:this.engine,files:[...this.files].map(([file,disk])=>({path:file,bytes:this.encode(file),baseline:disk.pendingWrite?null:disk.bytes}))};
+  }
+  async restore(snapshot:ProjectSnapshot){
+    if(path.resolve(snapshot.root)!==this.root)throw new Error('恢复记录不属于当前工程。');
+    for(const file of snapshot.files){
+      contained(this.root,file.path);
+      const disk=this.files.get(file.path);
+      if(disk){
+        if(disk.info.editable){const text=new TextDecoder('utf-8',{fatal:true}).decode(file.bytes);this.history.texts.set(file.path,text);}
+        else if(!disk.bytes.equals(file.bytes))throw new Error('资源文件已变化，请恢复为副本。');
+      }else{
+        const editable=sourceExtensions.has(path.extname(file.path).toLowerCase())||file.path===REVIEW_FILE;
+        const text=editable?new TextDecoder('utf-8',{fatal:true}).decode(file.bytes):null;
+        this.addFile(file.path,file.bytes,editable?'UTF-8':'binary',text);
+        this.files.get(file.path)!.bom=file.bytes.subarray(0,3).equals(Buffer.from([0xef,0xbb,0xbf]));
+      }
+    }
+    this.configure(snapshot.main,snapshot.engine);this.version++;
+    return this.state();
   }
   async save() {
     const dirty = this.state().files.filter(f => f.dirty).map(file => ({...file, bytes: this.encode(file.path)}));

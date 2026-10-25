@@ -1,10 +1,12 @@
-import { app, BrowserWindow, dialog, ipcMain, Menu, shell,nativeImage } from 'electron';
+import { app, BrowserWindow, dialog, ipcMain, Menu, shell,nativeImage,safeStorage,net } from 'electron';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { Project } from '../core/project';
 import { Compiler, inspectTools } from '../core/compiler';
 import {FormulaCompiler} from '../core/formula';
-import type { Engine } from '../core/types';
+import {RecoveryStore,atomicWrite} from '../core/recovery';
+import {AiClient,AiSettings} from '../core/ai-client';
+import type { Engine,RecoveryInfo } from '../core/types';
 
 const customData=process.env.PAGEWEAVE_USER_DATA??process.env.MOGAO_USER_DATA;
 if(customData)app.setPath('userData',path.resolve(customData));
@@ -12,9 +14,12 @@ if(customData)app.setPath('userData',path.resolve(customData));
 // backgroundThrottling alone does not prevent native occlusion from pausing paint.
 if(process.platform==='win32')app.commandLine.appendSwitch('disable-features','CalculateNativeWinOcclusion');
 let window: BrowserWindow, project: Project, compiler: Compiler, allowClose = false;
+let recovery:RecoveryStore,pendingRecovery:{root:string;info:RecoveryInfo}|null=null;
 const dataRoot = () => app.getPath('userData');
 async function preferences() { try { return JSON.parse(await fs.readFile(path.join(dataRoot(), 'preferences.json'), 'utf8')); } catch { return {}; } }
-async function persist() { await fs.mkdir(dataRoot(), { recursive: true }); await fs.writeFile(path.join(dataRoot(), 'preferences.json'), JSON.stringify({ root: project.root, main: project.main, engine: project.engine }, null, 2)); }
+async function persist() { await fs.mkdir(dataRoot(), { recursive: true }); await atomicWrite(path.join(dataRoot(), 'preferences.json'), JSON.stringify({ root: project.root, main: project.main, engine: project.engine }, null, 2)); }
+const currentState=()=>({...project.state(),recovery:pendingRecovery?.info??null});
+async function selectProject(next:Project){project=next;const info=await recovery.find(next.root);pendingRecovery=info?{root:next.root,info}:null;if(!info){project.prepareWritingLayout();await recovery.checkpoint(project);}await persist();return currentState();}
 async function demoProject() {
   const destination = path.join(dataRoot(), 'papers', 'LaTeX 工程教程');
   if (!await fs.stat(path.join(destination, 'main.tex')).catch(() => null)) {
@@ -33,13 +38,17 @@ async function confirmLeave() {
   if (!project?.state().files.some(f => f.dirty)) return true;
   const choice = await dialog.showMessageBox(window, { type: 'question', title: '保留当前修改', message: '当前工程有尚未保存的修改。', buttons: ['保存并继续', '取消', '放弃修改'], defaultId: 0, cancelId: 1 });
   if (choice.response === 1) return false;
-  if (choice.response === 0) await project.save();
+  if (choice.response === 0) await recovery.save(project);
+  if (choice.response === 2) await recovery.clear(project.root);
   return true;
 }
 function handler(channel: string, callback: (...args: any[]) => any) {
-  ipcMain.handle(channel, (event, ...args) => {
+  ipcMain.handle(channel, async (event, ...args) => {
     if (event.sender !== window.webContents || event.senderFrame !== window.webContents.mainFrame) throw new Error('无效的应用请求。');
-    return callback(...args);
+    if(pendingRecovery&&!['project:initialize','project:recover','window:finish-close'].includes(channel))throw new Error('请先处理恢复记录。');
+    const before=project,version=project?.version,result=await callback(...args);
+    if(before===project&&project.version!==version)await recovery.checkpoint(project);
+    return result;
   });
 }
 app.whenReady().then(async () => {
@@ -49,30 +58,64 @@ app.whenReady().then(async () => {
     if(await fs.stat(legacy).catch(()=>null)){await fs.mkdir(dataRoot(),{recursive:true});await fs.copyFile(legacy,path.join(dataRoot(),'preferences.json'));}
   }
   compiler = new Compiler(path.join(dataRoot(), 'builds'));
+  recovery=new RecoveryStore(path.join(dataRoot(),'recovery'));
+  const aiSettings=new AiSettings(path.join(dataRoot(),'ai-config.json'),safeStorage),ai=new AiClient(aiSettings,(input,init)=>net.fetch(input instanceof URL?input.toString():input,init));
   const formulaCompiler=new FormulaCompiler(path.join(dataRoot(),'formula-builds'));
   const prefs = await preferences();
   const requested = process.argv.find(a => a.startsWith('--project='))?.slice('--project='.length);
   try { project = await Project.open(requested ?? prefs.root); if (prefs.root === project.root && prefs.main && prefs.engine) project.configure(prefs.main, prefs.engine); }
   catch { project = await writingProject(); }
-  await persist();
+  const recoveryRoot=requested??prefs.root??project.root,recoveryInfo=await recovery.find(recoveryRoot);
+  pendingRecovery=recoveryInfo?{root:recoveryRoot,info:recoveryInfo}:null;
+  if(!pendingRecovery){project.prepareWritingLayout();await recovery.checkpoint(project);}
+  if(!pendingRecovery)await persist();
   window = new BrowserWindow({ width: 1600, height: 1000, minWidth: 1100, minHeight: 720, title: 'PageWeave', backgroundColor: '#f2f5f9', show: false, icon: path.join(app.getAppPath(), 'assets', 'pageweave.ico'),
-    webPreferences: { preload: path.join(__dirname, 'preload.cjs'), contextIsolation: true, nodeIntegration: false, sandbox: true, spellcheck: false, backgroundThrottling: false } });
+    webPreferences: { preload: path.join(__dirname, 'preload.cjs'), contextIsolation: true, nodeIntegration: false, sandbox: true, spellcheck: false, backgroundThrottling: false, offscreen: process.env.PAGEWEAVE_BACKGROUND_TEST==='offscreen' } });
   window.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
-  window.webContents.on('will-navigate', event => event.preventDefault());
+  window.webContents.on('will-navigate', event => { if(event.url!==window.webContents.getURL())event.preventDefault(); });
   window.webContents.session.setPermissionRequestHandler((_webContents, _permission, callback) => callback(false));
+  // Present only after Chromium has produced a frame; a loaded DOM need not be painted yet.
+  window.once('ready-to-show',()=>{if(!process.env.PAGEWEAVE_BACKGROUND_TEST)window.show();});
+  window.on('show',()=>window.webContents.invalidate());
+  window.on('restore',()=>window.webContents.invalidate());
+  let rendererFailed=false,recoveringRenderer=false;
+  const rendererFailure=async()=>{
+    rendererFailed=true;if(recoveringRenderer||window.isDestroyed())return;recoveringRenderer=true;
+    try{
+      await recovery.checkpoint(project);
+      const choice=await dialog.showMessageBox(window,{type:'error',title:'PageWeave',message:'界面暂时无法显示。',buttons:['重新加载','关闭'],defaultId:0,cancelId:1});
+      if(choice.response===0){rendererFailed=false;window.webContents.reload();}
+      else if(await confirmLeave()){allowClose=true;window.close();}
+    }finally{recoveringRenderer=false;}
+  };
+  window.webContents.on('render-process-gone',()=>void rendererFailure().catch(error=>dialog.showErrorBox('PageWeave',String(error))));
+  window.webContents.on('preload-error',()=>{rendererFailed=true;});
+  window.on('close',event=>{if(!allowClose&&rendererFailed){event.preventDefault();void confirmLeave().then(leave=>{if(leave){allowClose=true;window.close();}}).catch(error=>dialog.showErrorBox('PageWeave',String(error)));}});
   window.on('close', event => { if (!allowClose) { event.preventDefault(); window.webContents.send('window:close-request'); } });
-  handler('project:initialize', async () => ({ project: project.state(), tools: await inspectTools() }));
+  handler('project:initialize', async () => ({ project: currentState(), tools: await inspectTools() }));
+  handler('ai:status',()=>aiSettings.status());
+  handler('ai:configure',(config,key)=>{ai.cancelAll();return aiSettings.configure(config,key);});
+  handler('ai:request',request=>ai.request(request));
+  handler('ai:cancel',id=>ai.cancel(id));
+  window.on('closed',()=>ai.cancelAll());
+  handler('project:recover',async(id:string,action:string)=>{
+    if(!pendingRecovery||id!==pendingRecovery.info.id||!['restore','discard'].includes(action))throw new Error('恢复操作无效。');
+    const root=pendingRecovery.root;
+    if(action==='restore')project=await recovery.restore(root,id);else await recovery.clear(root);
+    pendingRecovery=null;project.prepareWritingLayout();await recovery.checkpoint(project);await persist();return currentState();
+  });
   handler('project:open', async () => {
     if (!await confirmLeave()) return null;
     const choice = await dialog.showOpenDialog(window, { title: '打开 LaTeX 工程目录', properties: ['openDirectory'] });
     if (choice.canceled) return null;
-    const next = await Project.open(choice.filePaths[0]); project = next; await persist(); return project.state();
+    return selectProject(await Project.open(choice.filePaths[0]));
   });
-  handler('project:demo', async () => { if (!await confirmLeave()) return null; project = await demoProject(); await persist(); return project.state(); });
-  handler('writing:demo',async()=>{if(!await confirmLeave())return null;project=await writingProject();await persist();return project.state();});
+  handler('project:demo', async () => { if (!await confirmLeave()) return null; return selectProject(await demoProject()); });
+  handler('writing:demo',async()=>{if(!await confirmLeave())return null;return selectProject(await writingProject());});
   handler('writing:new',async()=>{if(!await confirmLeave())return null;const choice=await dialog.showOpenDialog(window,{title:'选择新文稿的存放目录',properties:['openDirectory','createDirectory']});if(choice.canceled)return null;const destination=path.join(choice.filePaths[0],'新文稿-'+Date.now());const next=await writingProject(destination);const text=next.history.texts.get('main.tex')!;next.source('main.tex',text.replace(/\\begin\{document\}[\s\S]*\\end\{document\}/,'\\begin{document}\n\\MogaoBlock{start}{\n\\MogaoPara{justify}{1.5}{\\strut}\n}\n\\end{document}'),0);await next.save();project=await Project.open(destination);await persist();return project.state();});
   handler('writing:edit',(id,content,version)=>project.writeBlock(id,content,version));
   handler('writing:flow',(parts,version,document)=>project.writeFlow(parts,version,document));
+  handler('writing:plan',(plan,version)=>project.pagePlan(plan,version));
   handler('writing:import-image',(bytes:Uint8Array,version:number)=>{
     if(!(bytes instanceof Uint8Array)||bytes.length>20*1024*1024)throw new Error('请选择 20 MB 以内的图片。');
     const image=nativeImage.createFromBuffer(Buffer.from(bytes));if(image.isEmpty())throw new Error('无法读取图片，请使用 PNG、JPEG 或 WebP。');
@@ -88,13 +131,14 @@ app.whenReady().then(async () => {
   handler('project:width', (id: string, value: number, unit: string, version: number) => project.width(id, value, unit, version));
   handler('project:undo', (version: number) => project.undo(version));
   handler('project:redo', (version: number) => project.redo(version));
-  handler('project:save', async () => { const state = await project.save(); await persist(); return state; });
+  handler('project:save', async () => { const state = await recovery.save(project); await persist(); return state; });
+  handler('project:auto-save',()=>recovery.save(project));
   handler('project:save-as',async()=>{
     const choice=await dialog.showSaveDialog(window,{title:'文稿另存为',buttonLabel:'保存工程',defaultPath:path.join(path.dirname(project.root),path.basename(project.root)+'-副本')});
     if(choice.canceled||!choice.filePath)return null;
-    const next=await project.saveAs(choice.filePath);project=next;await persist();return project.state();
+    const previous=project.root,next=await project.saveAs(choice.filePath);await recovery.clear(previous);return selectProject(next);
   });
-  handler('project:reload', async () => { if (!await confirmLeave()) return null; const next = await Project.open(project.root); next.configure(project.main, project.engine); project = next; return project.state(); });
+  handler('project:reload', async () => { if (!await confirmLeave()) return null; const next = await Project.open(project.root); next.configure(project.main, project.engine); return selectProject(next); });
   handler('project:configure', async (main: string, engine: Engine) => { const state = project.configure(main, engine); await persist(); return state; });
   handler('project:reveal', async () => { await shell.openPath(project.root); });
   handler('build:compile', () => compiler.compile(project));
@@ -115,6 +159,5 @@ app.whenReady().then(async () => {
   handler('window:finish-close', async () => { if (await confirmLeave()) { allowClose = true; window.close(); } });
   if (process.env.VITE_DEV_SERVER_URL) await window.loadURL(process.env.VITE_DEV_SERVER_URL);
   else await window.loadFile(path.join(app.getAppPath(), 'dist', 'index.html'));
-  window.show();
 }).catch(error => { dialog.showErrorBox('PageWeave 无法启动', String(error)); app.quit(); });
 app.on('window-all-closed', () => app.quit());

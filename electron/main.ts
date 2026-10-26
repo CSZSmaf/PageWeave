@@ -4,7 +4,8 @@ import path from 'node:path';
 import { Project } from '../core/project';
 import { Compiler, inspectTools } from '../core/compiler';
 import {FormulaCompiler} from '../core/formula';
-import {RecoveryStore,atomicWrite} from '../core/recovery';
+import {RecoveryStore} from '../core/recovery';
+import {PreferenceStore,type DocumentReference} from '../core/preferences';
 import {AiClient,AiSettings} from '../core/ai-client';
 import type { Engine,RecoveryInfo } from '../core/types';
 import {DEFAULT_DOCUMENT_NAME,documentFileName} from '../core/file-name';
@@ -18,8 +19,9 @@ if(process.platform==='win32')app.commandLine.appendSwitch('disable-features','C
 let window: BrowserWindow, project: Project, compiler: Compiler, allowClose = false;
 let recovery:RecoveryStore,pendingRecovery:{root:string;info:RecoveryInfo}|null=null;
 const dataRoot = () => app.getPath('userData');
-async function preferences() { try { return JSON.parse(await fs.readFile(path.join(dataRoot(), 'preferences.json'), 'utf8')); } catch { return {}; } }
-async function persist() { await fs.mkdir(dataRoot(), { recursive: true }); await atomicWrite(path.join(dataRoot(), 'preferences.json'), JSON.stringify({ root: project.root, main: project.main, engine: project.engine,scope:project.scope }, null, 2)); if(window&&!window.isDestroyed())window.setTitle(documentFileName(project.main)+' — PageWeave'); }
+let preferences:PreferenceStore;
+const projectReference=():DocumentReference=>({root:project.root,main:project.main,engine:project.engine,scope:project.scope});
+async function persist(previous?:DocumentReference) { await preferences.remember(projectReference(),previous); if(window&&!window.isDestroyed())window.setTitle(documentFileName(project.main)+' — PageWeave'); }
 const currentState=()=>({...project.state(),recovery:pendingRecovery?.info??null});
 async function selectProject(next:Project){project=next;const info=await recovery.find(next.root);pendingRecovery=info?{root:next.root,info}:null;if(!info){project.prepareWritingLayout();await recovery.checkpoint(project);}await persist();return currentState();}
 async function demoProject() {
@@ -63,9 +65,10 @@ app.whenReady().then(async () => {
   recovery=new RecoveryStore(path.join(dataRoot(),'recovery'));
   const aiSettings=new AiSettings(path.join(dataRoot(),'ai-config.json'),safeStorage),ai=new AiClient(aiSettings,(input,init)=>net.fetch(input instanceof URL?input.toString():input,init));
   const formulaCompiler=new FormulaCompiler(path.join(dataRoot(),'formula-builds'));
-  const prefs = await preferences();
+  preferences=new PreferenceStore(path.join(dataRoot(),'preferences.json'));
+  const prefs = await preferences.read();
   const requested = process.argv.find(a => a.startsWith('--project='))?.slice('--project='.length);
-  try { const input=requested??prefs.root;if(typeof input!=='string')throw new Error('No previous document');project=/\.tex$/i.test(input)?await Project.openFile(input):await Project.open(input,!requested&&prefs.scope==='file'?prefs.main:undefined); if (!requested&&project.files.has(prefs.main)&&prefs.engine) project.configure(prefs.main, prefs.engine); }
+  try { const input=requested??prefs.root;if(typeof input!=='string')throw new Error('No previous document');project=/\.tex$/i.test(input)?await Project.openFile(input):await Project.open(input,!requested&&prefs.scope==='file'?prefs.main:undefined); if (!requested&&prefs.main&&project.files.has(prefs.main)&&prefs.engine) project.configure(prefs.main, prefs.engine); }
   catch { project = await writingProject(); }
   const recoveryRoot=requested?project.root:typeof prefs.root==='string'?prefs.root:project.root,recoveryInfo=await recovery.find(recoveryRoot);
   pendingRecovery=recoveryInfo?{root:recoveryRoot,info:recoveryInfo}:null;
@@ -113,7 +116,15 @@ app.whenReady().then(async () => {
     if (choice.canceled) return null;
     return selectProject(folder?await Project.open(choice.filePaths[0]):await Project.openFile(choice.filePaths[0]));
   });
-  handler('project:rename',async(name:string,version:number)=>{project.assertVersion(version);await recovery.save(project);await project.renameMain(name,project.version);await recovery.checkpoint(project);await persist();return currentState();});
+  handler('project:recent',async()=>(await preferences.read()).recent);
+  handler('project:clear-recent',async()=>{await preferences.clearRecent();});
+  handler('project:open-recent',async(id:string)=>{
+    const entry=(await preferences.read()).recent.find(item=>item.id===id);if(!entry)throw new Error('此文稿已不在最近打开记录中。');
+    if(!await fs.stat(path.join(entry.root,entry.main)).then(stat=>stat.isFile()).catch(()=>false))throw new Error('找不到此文稿，可能已移动或重命名。请重新打开 .tex 文件。');
+    if(!await confirmLeave())return null;
+    const next=await Project.open(entry.root,entry.scope==='file'?entry.main:undefined);next.configure(entry.main,entry.engine);return selectProject(next);
+  });
+  handler('project:rename',async(name:string,version:number)=>{const previous=projectReference();project.assertVersion(version);await recovery.save(project);await project.renameMain(name,project.version);await recovery.checkpoint(project);await persist(previous);return currentState();});
   handler('project:demo', async () => { if (!await confirmLeave()) return null; return selectProject(await demoProject()); });
   handler('writing:demo',async()=>{if(!await confirmLeave())return null;return selectProject(await writingProject());});
   handler('writing:new',async()=>{if(!await confirmLeave())return null;const directory=path.join(app.getPath('documents'),'PageWeave');await fs.mkdir(directory,{recursive:true});const choice=await dialog.showSaveDialog(window,{title:'新建 LaTeX 文稿',defaultPath:path.join(directory,DEFAULT_DOCUMENT_NAME),buttonLabel:'创建',filters:[{name:'LaTeX 文稿',extensions:['tex']}]});if(choice.canceled||!choice.filePath)return null;return selectProject(await Project.createDocument(choice.filePath,path.join(app.getAppPath(),'examples','writing')));});

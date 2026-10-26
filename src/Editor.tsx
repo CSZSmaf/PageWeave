@@ -37,6 +37,7 @@ export default function Editor(props: Props) {
       EditorView.theme({ '&': { height: '100%', fontSize: '13px' }, '.cm-scroller': { overflow: 'auto', fontFamily: '"Cascadia Code", Consolas, "Microsoft YaHei", monospace', lineHeight: '1.9' }, '.cm-content': { padding: '18px 0 80px' }, '.cm-line': { padding: '0 18px 0 10px' }, '.cm-gutters': { background: '#fff', color: '#a2a8b4', border: 'none', minWidth: '42px' }, '.cm-activeLine, .cm-activeLineGutter': { background: '#eff5ff' }, '&.cm-focused': { outline: 'none' } }),
     ] });
     view.current = new EditorView({ state, parent: host.current! });
+    callbacks.current.onCursor(1);
     search=sourceSearch(view.current,async()=>{await callbacks.current.onSearchBoundary?.();if(!alive)throw new Error('编辑器已关闭。');},()=>alive);
     callbacks.current.onSearchReady?.(search);
     return () => { alive=false;callbacks.current.onSearchReady?.(null);view.current?.destroy(); view.current = null; };
@@ -55,6 +56,7 @@ export default function Editor(props: Props) {
     const editor = view.current; if (!editor || !props.location) return;
     const line = editor.state.doc.line(Math.max(1, Math.min(props.location.line, editor.state.doc.lines)));
     editor.dispatch({ selection: { anchor: line.from, head: line.to }, effects: EditorView.scrollIntoView(line.from, { y: 'center' }) });
+    editor.focus();
   }, [props.location, props.file]);
   return <div className="editor-host" ref={host} />;
 }

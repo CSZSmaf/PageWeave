@@ -32,6 +32,7 @@ export interface CompileResult {
 }
 export interface ToolInfo { name: string; available: boolean; detail: string }
 export interface RecoveryInfo {id:string;name:string;savedAt:string;conflict:boolean}
+export interface RecentDocument {id:string;root:string;main:string;engine:Engine;scope:'file'|'folder';openedAt:string}
 export interface WorkbenchApi {
   onAutomationRequest(callback:(request:{id:string;action:string})=>void):()=>void;
   automationExecute(id:string):Promise<import('./automation').AutomationStep>;
@@ -43,6 +44,9 @@ export interface WorkbenchApi {
   initialize(): Promise<{ project: ProjectState; tools: ToolInfo[] }>;
   resolveRecovery(id:string,action:'restore'|'discard'):Promise<ProjectState>;
   open(mode?:'file'|'folder'): Promise<ProjectState | null>;
+  recentDocuments():Promise<RecentDocument[]>;
+  openRecent(id:string):Promise<ProjectState|null>;
+  clearRecent():Promise<void>;
   renameDocument(name:string,version:number):Promise<ProjectState>;
   demo(): Promise<ProjectState | null>;
   writingDemo(): Promise<ProjectState | null>;

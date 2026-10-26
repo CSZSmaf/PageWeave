@@ -3,6 +3,8 @@ import {designedTable,serializeDesignedTable,parseTableOptions,tableColumnSpec,c
 import {designedParagraph,serializeDesignedParagraph} from './paragraph-design';
 import {serializeDrawing,validateDiagram,diagramTikz} from './drawing';
 import {decodeMetadata} from './page-furniture';
+import {linkTex,readLinkTex} from './inline-format';
+import {legacyTex} from './tex-names';
 export interface RichNode { type: string; text?: string; attrs?: Record<string, any>; marks?: {type:string;attrs?:Record<string,any>}[]; content?: RichNode[] }
 export interface WritingBlock { id:string; file:string; line:number; range:Range; bodyRange:Range; content:RichNode; editable:boolean; error?:string }
 export interface WritingRegion { id:string; page:number; x:number; y:number; width:number; height:number }
@@ -25,14 +27,18 @@ export function serializeInline(node:RichNode):string{
   if(node.type==='inlineMath')return `\\MogaoInlineMath{${node.attrs?.latex??''}}`;
   if(node.type!=='text')throw new Error('不支持的正文结构：'+node.type);
   let result=escapeText(node.text??'');
-  for(const mark of node.marks??[]) {
+  const order=['bold','italic','underline','strike','superscript','subscript'];
+  for(const mark of [...(node.marks??[])].sort((a,b)=>order.indexOf(a.type)-order.indexOf(b.type))) {
     if(mark.type==='bold')result=`\\textbf{${result}}`;
     if(mark.type==='italic')result=`\\textit{${result}}`;
     if(mark.type==='underline')result=`\\uline{${result}}`;
     if(mark.type==='strike')result=`\\sout{${result}}`;
+    if(mark.type==='superscript')result=`\\textsuperscript{${result}}`;
+    if(mark.type==='subscript')result=`\\textsubscript{${result}}`;
   }
   const style=node.marks?.find(m=>m.type==='textStyle')?.attrs;
   if(style){const family=FONTS.includes(style.fontFamily)?style.fontFamily:'';const size=style.fontSize?num(style.fontSize,12,6,96):'';const color=/^#[a-f\d]{6}$/i.test(style.color??'')?style.color.slice(1):'';result=`\\MogaoText{${family}}{${size}}{${color}}{${result}}`;}
+  const link=node.marks?.find(m=>m.type==='link');if(link)result=`\\PageWeaveLink{${linkTex(link.attrs?.href)}}{${result}}`;
   return result;
 }
 export function serializeRich(doc:RichNode,listDepth=0):string{
@@ -84,8 +90,12 @@ function inline(source:string,marks:RichNode['marks']=[]):RichNode[]{
     flush();
     if(name==='MogaoLineBreak'){const g=readGroup(source,i);if(g)i=g.to;nodes.push({type:'hardBreak'});continue;}
     if(name==='MogaoInlineMath'){const g=readGroup(source,i);if(!g)throw new Error('公式未闭合');i=g.to;nodes.push({type:'inlineMath',attrs:{latex:g.text}});continue;}
-    const mark=({textbf:'bold',textit:'italic',uline:'underline',sout:'strike'})[name as 'textbf'];
+    const mark=({textbf:'bold',textit:'italic',uline:'underline',sout:'strike',textsuperscript:'superscript',textsubscript:'subscript'})[name as 'textbf'];
     if(mark){const g=readGroup(source,i);if(!g)throw new Error('格式命令未闭合');i=g.to;nodes.push(...inline(g.text,[...(marks??[]),{type:mark}]));continue;}
+    if(name==='PageWeaveLink'||name==='href'){
+      const href=readGroup(source,i),body=href&&readGroup(source,href.to);if(!href||!body)throw new Error('链接未闭合');i=body.to;
+      nodes.push(...inline(body.text,[...(marks??[]),{type:'link',attrs:{href:readLinkTex(href.text)}}]));continue;
+    }
     if(name==='MogaoText'){
       const args=[];for(let k=0;k<4;k++){const g=readGroup(source,i);if(!g)throw new Error('字体命令未闭合');args.push(g.text);i=g.to;}
       nodes.push(...inline(args[3],[...(marks??[]),{type:'textStyle',attrs:{...(args[0]?{fontFamily:args[0]}:{}),...(args[1]?{fontSize:args[1]+'pt'}:{}),...(args[2]?{color:'#'+args[2]}:{})}}]));continue;
@@ -95,6 +105,7 @@ function inline(source:string,marks:RichNode['marks']=[]):RichNode[]{
   flush();return nodes;
 }
 export function parseRich(source:string,listDepth=0):RichNode{
+  source=legacyTex(source);
   const content:RichNode[]=[];let i=0;
   while(i<source.length){
     if(/\s/.test(source[i])){i++;continue;}if(source[i]==='%'){const e=source.indexOf('\n',i);i=e<0?source.length:e+1;continue;}
@@ -166,10 +177,10 @@ export function parseRich(source:string,listDepth=0):RichNode{
   return {type:'doc',content:content.length?content:[{type:'paragraph'}]};
 }
 export function parseWriting(source:string,file:string):WritingBlock[]{
-  const blocks:WritingBlock[]=[];const re=/\\MogaoBlock\s*\{/g;
+  const blocks:WritingBlock[]=[];const re=/\\(?:MogaoBlock|PWBlock)\s*\{/g;
   for(let m;(m=re.exec(source));){
     const prefix=source.slice(source.lastIndexOf('\n',m.index)+1,m.index);if(/(^|[^\\])%/.test(prefix))continue;
-    const id=readGroup(source,m.index+'\\MogaoBlock'.length);if(!id)continue;const body=readGroup(source,id.to);if(!body)continue;re.lastIndex=body.to;
+    const id=readGroup(source,m.index+m[0].lastIndexOf('{'));if(!id)continue;const body=readGroup(source,id.to);if(!body)continue;re.lastIndex=body.to;
     const base={id:id.text,file,line:source.slice(0,m.index).split('\n').length,range:{from:m.index,to:body.to},bodyRange:body.inner};
     try{blocks.push({...base,content:parseRich(body.text),editable:true});}catch(e){blocks.push({...base,content:{type:'doc',content:[]},editable:false,error:String(e)});}
   }

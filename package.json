@@ -1,7 +1,7 @@
 {
   "name": "pageweave",
   "productName": "PageWeave",
-  "version": "0.12.0",
+  "version": "0.13.0",
   "private": true,
   "license": "Apache-2.0",
   "description": "Continuous page writing, editable formulas and LaTeX PDF output",
@@ -67,7 +67,8 @@
       "COPYRIGHT",
       "LICENSE",
       "THIRD_PARTY_NOTICES.txt",
-      "third-party/**/*"
+      "third-party/**/*",
+      "docs/TEX.md"
     ],
     "win": {
       "target": "dir",
@@ -83,6 +84,10 @@
       {
         "from": "docs/CLI.md",
         "to": "docs/CLI.md"
+      },
+      {
+        "from": "docs/TEX.md",
+        "to": "docs/TEX.md"
       }
     ]
   },

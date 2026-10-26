@@ -36,6 +36,8 @@ import {documentFileName} from '../../core/file-name';
 import brandIcon from '../../assets/pageweave.png';
 
 import {syncTextSelection} from './selection';
+import LinkDialog from './LinkDialog';
+import './chrome.css';
 
 const api=window.workbench;
 function syncSelection(e:Editor){syncTextSelection(e.view);}
@@ -43,6 +45,7 @@ function syncSelection(e:Editor){syncTextSelection(e.view);}
 export default function WritingApp(){
   const [recovery,setRecovery]=useState<RecoveryInfo|null>(null),[recovering,setRecovering]=useState(false),[saveStatus,setSaveStatus]=useState<SaveStatus>('saved');
   const [paragraphDialog,setParagraphDialog]=useState(false),[tableProperties,setTableProperties]=useState(false),[furnitureDialog,setFurnitureDialog]=useState(false),[drawingRequest,setDrawingRequest]=useState<DrawingRequest|null>(null);
+  const [linkDialog,setLinkDialog]=useState(false);
   const [aiOpen,setAiOpen]=useState(false);
   const [openMenu,setOpenMenu]=useState(false);
   const [recent,setRecent]=useState<RecentDocument[]>([]),[palette,setPalette]=useState(false),[goTo,setGoTo]=useState(false);
@@ -216,6 +219,7 @@ export default function WritingApp(){
     {id:'paste-format',label:'粘贴文字格式',shortcut:'Ctrl+Alt+V',keywords:'paste format',disabled:!enabled||view!=='write'||formatClipboard.current===null,run:pasteFormat},
     {id:'image',label:'插入图片',keywords:'insert image',disabled:!enabled||view!=='write'||e?.isActive('table')||e?.isActive('listItem'),run:()=>imageInput.current?.click()},
     {id:'table',label:'插入表格',keywords:'insert table',disabled:!enabled||view!=='write'||e?.isActive('table')||e?.isActive('listItem'),run:()=>setTableDialog(true)},
+    {id:'link',label:'插入或编辑链接',shortcut:'Ctrl+K',keywords:'insert hyperlink',disabled:!enabled||view!=='write',run:()=>{if(e)syncSelection(e);setLinkDialog(true);}},
     {id:'formula',label:'插入行内公式',keywords:'insert math equation',disabled:!enabled||view!=='write',run:()=>equation(false)},
     {id:'drawing',label:'插入图形或流程图',keywords:'drawing shapes diagram flowchart',disabled:!enabled||view!=='write'||e?.isActive('table')||e?.isActive('listItem'),run:insertDrawing},
     {id:'paragraph',label:'段落设置',keywords:'paragraph spacing',disabled:!enabled,run:()=>setParagraphDialog(true)},
@@ -240,6 +244,7 @@ export default function WritingApp(){
     if(!mod)return;
     if(event.altKey&&!event.shiftKey&&view==='write'&&editor.current?.view.dom.contains(event.target as Node)&&['c','v'].includes(key)){event.preventDefault();event.stopPropagation();if(key==='c'){copyFormat();notify('文字格式已复制。');}else pasteFormat();return;}
     if(event.altKey||event.shiftKey)return;
+    if(key==='k'&&view==='write'&&enabled&&!((event.target as HTMLElement).closest('.ai-panel,.review-panel,input,textarea'))){event.preventDefault();event.stopPropagation();if(e)syncSelection(e);setLinkDialog(true);return;}
     if(['o','n','g'].includes(key)){event.preventDefault();event.stopPropagation();if(key==='g'){if(destinationMax)setGoTo(true);}else void switchProject(key==='o'?'open':'newDocument');}
   };window.addEventListener('keydown',key,true);return()=>window.removeEventListener('keydown',key,true);});
   const sourceReviewLocked=reviewLocked(view==='source'?project?.reviewDocument:e?reviewSnapshot(e.state.doc).doc:null);
@@ -273,7 +278,7 @@ export default function WritingApp(){
       <div className="tool-group"><label>文件<select aria-label="源文件" value={sourceFile} onChange={event=>setSourceFile(event.target.value)}>{project?.files.filter(f=>f.path!==REVIEW_FILE&&f.path!=='pageweave-pages.tex').map(f=><option key={f.path} value={f.path}>{f.path}{f.dirty?' *':''}</option>)}</select></label></div>
       <div className="tool-group"><label>主文件<select aria-label="主文件" value={project?.main} onChange={event=>{const file=event.target.value;void run(()=>session.current!.mutate(p=>api.configure(file,p.engine)));}}>{project?.files.filter(f=>/\.tex$/i.test(f.path)&&f.path!=='pageweave-pages.tex').map(f=><option key={f.path}>{f.path}</option>)}</select></label><select aria-label="编译器" value={project?.engine} onChange={event=>{const engine=event.target.value as Engine;void run(()=>session.current!.mutate(p=>api.configure(p.main,engine)));}}><option value="xelatex">XeLaTeX</option><option value="pdflatex">pdfLaTeX</option><option value="lualatex">LuaLaTeX</option></select></div>
       <button disabled={busy} onClick={()=>void compileSource()}><RefreshCw size={16}/><span>重新排版</span></button><button onClick={()=>void run(()=>api.reveal())}><FolderOpen size={16}/><span>工程文件夹</span></button><button disabled={busy} onClick={()=>void switchProject('reload')}>重新读取</button><div className="ribbon-search"><button aria-label="查找与替换" title="查找 · Ctrl+F / 替换 · Ctrl+H" disabled={!sourceSearch} onClick={()=>openSearch('find')}><Search size={17}/><span>查找</span></button></div>
-    </div>:<WritingToolbar editor={e} enabled={enabled} bodyWidth={paperLayout(project).width-2*paperLayout(project).margin} onSyncSelection={()=>{if(e)syncSelection(e);}} onParagraph={()=>{if(e)syncSelection(e);setParagraphDialog(true);}} onFurniture={()=>setFurnitureDialog(true)} onTableProperties={()=>setTableProperties(true)} onDrawing={insertDrawing} onEditDrawing={editDrawing} painterArmed={formatArmed} onPainter={startPainter} painterEnabled={enabled&&view==='write'} tab={ribbonTab} reviewTools={<ReviewTools editor={e} enabled={enabled&&view==='write'} onComment={newComment} onPanel={mode=>void openReview(mode)} onError={error=>notify(error,true)}/>}  format={format} history={history} onMath={equation} onImage={()=>imageInput.current?.click()} onTable={()=>setTableDialog(true)} onLayout={openLayout} onFormulas={()=>setFormulasVisible(true)} onOutline={()=>setNavVisible(!navVisible)} onSearch={()=>{if(view==='pdf')void changeView('write');openSearch('find');}}/>}
+    </div>:<WritingToolbar onLink={()=>{if(e)syncSelection(e);setLinkDialog(true);}} editor={e} enabled={enabled} bodyWidth={paperLayout(project).width-2*paperLayout(project).margin} onSyncSelection={()=>{if(e)syncSelection(e);}} onParagraph={()=>{if(e)syncSelection(e);setParagraphDialog(true);}} onFurniture={()=>setFurnitureDialog(true)} onTableProperties={()=>setTableProperties(true)} onDrawing={insertDrawing} onEditDrawing={editDrawing} painterArmed={formatArmed} onPainter={startPainter} painterEnabled={enabled&&view==='write'} tab={ribbonTab} reviewTools={<ReviewTools editor={e} enabled={enabled&&view==='write'} onComment={newComment} onPanel={mode=>void openReview(mode)} onError={error=>notify(error,true)}/>}  format={format} history={history} onMath={equation} onImage={()=>imageInput.current?.click()} onTable={()=>setTableDialog(true)} onLayout={openLayout} onFormulas={()=>setFormulasVisible(true)} onOutline={()=>setNavVisible(!navVisible)} onSearch={()=>{if(view==='pdf')void changeView('write');openSearch('find');}}/>}
     {view==='source'&&sourceReviewLocked&&sourceFile===project?.main&&<div className="source-review-notice"><span>关闭修订并处理待审修改后，可编辑正文源码。</span><button onClick={()=>void openReview('changes')}>返回审阅</button></div>}
     <SearchPanel request={view==='pdf'?null:searchRequest} target={searchTarget} scope={view==='source'?sourceFile:'正文'} onMode={mode=>setSearchRequest(request=>request?{...request,mode}:null)} onClose={()=>setSearchRequest(null)}/>
     <input ref={imageInput} type="file" accept="image/png,image/jpeg,image/webp" aria-label="图片文件" hidden onChange={ev=>{const file=ev.target.files?.[0];ev.target.value='';if(file)void importImage(file);}}/>
@@ -285,10 +290,11 @@ export default function WritingApp(){
         {view==='pdf'&&<div className="writer-view">{project&&!supported&&<div className="flow-unavailable"><span>当前工程的正文需要在源码视图中编辑。</span><button className="outline-button" onClick={()=>void changeView('source')}>查看源码</button></div>}<WritingPdf result={preview} blocks={supported?project?.writing??[]:[]} active={null} selected={null} zoom={zoom} onSelect={()=>{}} onEdit={begin} onReady={()=>{}} onChange={()=>{}} onFinish={()=>{}} onMath={setMath} onError={msg=>notify(msg,true)} onPages={setPdfPages}/></div>}
         {log&&<div className="writer-log"><div><strong>排版日志</strong><button aria-label="关闭排版日志" onClick={()=>setLog(false)}><X size={16}/></button></div><pre>{last?.log??'尚无日志'}</pre></div>}
       </main>
-      {aiOpen&&<AiPanel key={project.id} editor={view==='write'?e:null} onClose={()=>setAiOpen(false)}/>}
+      {<AiPanel key={project.id} open={aiOpen} editor={view==='write'?e:null} onClose={()=>setAiOpen(false)}/>}
       {reviewOpen&&view==='write'&&<ReviewPanel key={project?.id} editor={e} mode={reviewMode} onMode={setReviewMode} anchor={commentAnchor} focus={commentFocus} onCancelDraft={()=>setCommentAnchor(null)} onClose={()=>{setReviewOpen(false);setCommentAnchor(null);}} error={project?.reviewError} onError={error=>notify(error,true)}/>}
     </div>
     <footer className="writer-status"><span>{last?.ok===false?'排版失败':busy?'正在排版…':pending?'正在同步…':preview?.version===project?.version?'排版已更新':'等待排版'}</span><span aria-label="保存状态" role="status">{saveStatus==='saving'?'正在保存…':saveStatus==='pending'?'待保存':saveStatus==='error'?'保存失败':'已保存'}</span><button aria-label={view==='source'?'转到源码行':'转到页面'} title="跳转 · Ctrl+G" disabled={!destinationMax} onClick={()=>setGoTo(true)}>{view==='source'?`第 ${sourceLine} 行`:`${view==='pdf'?pdfPages:pages} 页`}</button><button className="word-count" aria-label="字数统计" disabled={!count} title="中文按字，英文和数字按词；不含公式、图片及 LaTeX 命令" onClick={()=>setWordDialog(true)}>{count?selectionCount?`已选 ${selectionCount} / 共 ${count.words} 字`:`${count.words} 字`:'字数 —'}</button><button onClick={()=>setLog(!log)}>日志</button><button title="命令面板 · Ctrl+Shift+P" onClick={()=>setPalette(true)}>命令</button>{formatArmed&&<button className="painter-status" onClick={()=>setFormatArmed(false)}>格式刷：选择文字 · Esc 取消</button>}<span className="writer-status-spacer"/>{view==='source'?<span>{activeSource?.encoding??''}</span>:<><button aria-label="缩小页面" onClick={()=>setZoom(v=>Math.max(.5,v-.1))}><Minus size={14}/></button><span>{Math.round(zoom*100)}%</span><button aria-label="放大页面" onClick={()=>setZoom(v=>Math.min(1.6,v+.1))}><Plus size={14}/></button></>}</footer>
+    {linkDialog&&e&&<LinkDialog editor={e} onClose={()=>setLinkDialog(false)}/>}
     {paragraphDialog&&e&&<ParagraphDialog editor={e} onClose={()=>setParagraphDialog(false)}/>}
     {tableProperties&&e&&tableContext(e)&&<TableProperties editor={e} bodyWidth={paperLayout(project).width-2*paperLayout(project).margin} onClose={()=>setTableProperties(false)}/>}
     {furnitureDialog&&<FurnitureDialog initial={readFurniture(project.files.find(file=>file.path===project.main)?.content??'')??defaultFurniture()} onClose={()=>setFurnitureDialog(false)} onApply={async value=>{capture();await session.current?.mutate(p=>api.pageFurniture(value,p.version));}}/>}

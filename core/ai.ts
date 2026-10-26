@@ -1,12 +1,12 @@
 import {FONTS} from './writing';
 export type AiProvider='openai'|'deepseek'|'gemini'|'compatible';
-export type AiMode='chat'|'draft'|'format';
+export type AiMode='assistant'|'chat'|'draft'|'format';
 export interface AiConfig {provider:AiProvider;baseUrl:string;model:string;rememberKey:boolean}
 export interface AiStatus extends AiConfig {hasKey:boolean;canRememberKey:boolean}
 export interface AiMessage {role:'user'|'assistant';content:string}
-export interface AiRequest {id:string;mode:AiMode;messages:AiMessage[];context?:string}
+export interface AiRequest {id:string;mode:AiMode;messages:AiMessage[];context?:string;hasSelection?:boolean}
 export interface AiFormat {fontFamily?:string;fontSize?:number;lineHeight?:number;textAlign?:'left'|'center'|'right'|'justify';color?:string}
-export interface AiReply {text:string;format?:AiFormat}
+export interface AiReply {text:string;draft?:string;format?:AiFormat}
 export const AI_PROVIDERS:{id:AiProvider;name:string;baseUrl:string}[]=[
   {id:'openai',name:'OpenAI',baseUrl:'https://api.openai.com/v1'},
   {id:'deepseek',name:'DeepSeek',baseUrl:'https://api.deepseek.com'},
@@ -39,4 +39,16 @@ export function parseAiFormat(text:string):AiFormat {
 export function formatDescription(format:AiFormat){
   const align={left:'左对齐',center:'居中',right:'右对齐',justify:'两端对齐'};
   return [format.fontFamily,format.fontSize&&`${format.fontSize} 磅`,format.lineHeight&&`${format.lineHeight} 倍行距`,format.textAlign&&align[format.textAlign],format.color].filter(Boolean).join(' · ');
+}
+/** Providers without JSON mode may return plain prose; only validated objects can offer edits. */
+export function parseAiReply(text:string):AiReply {
+  const source=text.trim().replace(/^```(?:json)?\s*/,'').replace(/\s*```$/,'');
+  if(!source.startsWith('{'))return {text:text.trim()};
+  let value:Record<string,unknown>;try{value=JSON.parse(source);}catch{throw new Error('AI 建议未完整生成，请重新发送。');}
+  if(!value||Array.isArray(value)||Object.keys(value).some(key=>!['reply','draft','format'].includes(key))||typeof value.reply!=='string')throw new Error('AI 建议格式无法识别，请重新发送。');
+  const result:AiReply={text:value.reply.trim()};
+  if(value.draft!==undefined){if(typeof value.draft!=='string'||!value.draft.trim())throw new Error('AI 未返回可插入的正文。');result.draft=value.draft.trim();}
+  if(value.format!==undefined)result.format=parseAiFormat(JSON.stringify(value.format));
+  if(!result.text&&!result.draft&&!result.format)throw new Error('AI 服务未返回可用的内容。');
+  return result;
 }

@@ -1,4 +1,5 @@
 import { promises as fs } from 'node:fs';
+import {lstatSync,readFileSync} from 'node:fs';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { TextHistory, minimalPatch } from './history';
@@ -15,7 +16,10 @@ import {documentFiles} from './document-files';
 import {texFileName} from './file-name';
 import {constants as fsConstants} from 'node:fs';
 import {DESIGN_STYLE,DESIGN_STYLE_FILE} from './design-style';
+import {INLINE_STYLE,INLINE_STYLE_FILE} from './inline-format';
 import {writeFurniture,validateFurniture,type PageFurniture} from './page-furniture';
+import {LEGACY_BASE_STYLE,PAGEWEAVE_STYLES} from './pageweave-package';
+import {shortTex,legacyTex,usesPageWeave} from './tex-names';
 
 const sourceExtensions = new Set(['.tex', '.bib', '.sty', '.cls', '.txt', '.md', '.bst', '.cfg']);
 const excludedDirectories = new Set(['node_modules', '.git', '.tex-workbench', 'dist', 'dist-electron', 'release','recovery']);
@@ -82,8 +86,9 @@ export class Project {
   static async createDocument(file:string,template:string){
     const name=texFileName(path.basename(file)),root=await fs.realpath(path.dirname(file)),target=contained(root,name);
     if(await fs.lstat(target).catch(()=>null))throw new Error('这个文件名已存在，请使用其他名称。');
-    const original=await Project.open(template),source=original.history.texts.get(original.main)!.replace(/\\begin\{document\}[\s\S]*\\end\{document\}/,'\\begin{document}\n\\MogaoBlock{start}{\n\\MogaoPara{justify}{1.5}{\\strut}\n}\n\\end{document}');
-    const styles=original.capture().files.filter(f=>/\.(sty|cls)$/i.test(f.path));
+    const original=await Project.open(template),blank=original.history.texts.get(original.main)!.replace(/\\begin\{document\}[\s\S]*\\end\{document\}/,'\\begin{document}\n\\MogaoBlock{start}{\n\\MogaoPara{justify}{1.5}{\\strut}\n}\n\\end{document}');
+    const source=usesPageWeave(blank)?shortTex(blank):blank,dependencies=await documentFiles(original.root,original.main);
+    const styles=original.capture().files.filter(f=>/\.(sty|cls)$/i.test(f.path)&&dependencies.includes(f.path));
     for(const style of styles){const full=contained(root,style.path),existing=await fs.lstat(full).catch(()=>null);if(existing&&(existing.isSymbolicLink()||!existing.isFile()||!(await fs.readFile(full)).equals(style.bytes)))throw new Error(`此目录已有不同的 ${style.path}，请选择其他存放目录。`);}
     for(const style of styles){const full=contained(root,style.path);try{await fs.writeFile(full,style.bytes,{flag:'wx'});}catch(error){if((error as NodeJS.ErrnoException).code!=='EEXIST'||!(await fs.readFile(full)).equals(style.bytes))throw error;}}
     await fs.writeFile(target,source,{flag:'wx'});return Project.openFile(target);
@@ -127,7 +132,27 @@ export class Project {
     this.reviewCache=undefined;this.main=next;this.version++;return this.state();
   }
   assertVersion(version: number) { if (version !== this.version) throw new Error('工程版本已变化，请刷新后重试。'); }
+  private preparePageWeavePackage(){
+    const source=this.history.texts.get(this.main)??'',equal=(a:string,b:string)=>a.replaceAll('\r\n','\n').trim()===b.replaceAll('\r\n','\n').trim();
+    if(usesPageWeave(source))return true;
+    if(!canFlow(this.state())||!/^\s*\\usepackage\{mogao\}\s*$/m.test(source)||!equal(this.history.texts.get('mogao.sty')??'',LEGACY_BASE_STYLE))return false;
+    const known:Record<string,string>={'mogao-tools.sty':WRITING_TOOLS_STYLE,[LIST_STYLE_FILE]:LIST_STYLE,[DESIGN_STYLE_FILE]:DESIGN_STYLE,[INLINE_STYLE_FILE]:INLINE_STYLE};
+    if(Object.entries(known).some(([file,expected])=>this.files.has(file)&&!equal(this.history.texts.get(file)??'',expected)))return false;
+    const candidates:{file:string;text:string;disk:boolean}[]=[];
+    for(const [file,text]of Object.entries(PAGEWEAVE_STYLES)){
+      const current=this.history.texts.get(file);
+      if(current!==undefined){if(!equal(current,text))return false;continue;}
+      const full=contained(this.root,file);let disk=false;
+      try{const stat=lstatSync(full);if(!stat.isFile()||stat.isSymbolicLink()||!readFileSync(full).equals(Buffer.from(text)))return false;disk=true;}catch(error){if((error as NodeJS.ErrnoException).code!=='ENOENT')return false;}
+      candidates.push({file,text,disk});
+    }
+    let next=source.replace(/^(\s*)\\usepackage\{mogao\}/m,'$1\\usepackage{pageweave}');
+    next=next.replace(/^[ \t]*\\usepackage\{(?:mogao-tools|pageweave-layout|pageweave-lists|pageweave-design|pageweave-text)\}[ \t]*\r?\n/gm,'');next=shortTex(next);
+    for(const {file,text,disk}of candidates){if(disk){const bytes=Buffer.from(text);this.files.set(file,{info:{path:file,content:text,editable:true,dirty:false,encoding:'UTF-8',size:bytes.length},bytes,bom:false,original:text});this.history.texts.set(file,text);}else this.addFile(file,Buffer.from(text),'UTF-8',text);}
+    if(this.history.commit('更新 PageWeave 宏包名称',[minimalPatch(this.main,source,next)]))this.version++;return true;
+  }
   prepareWritingLayout(){
+    if(this.preparePageWeavePackage())return;
     const state=this.state(),source=this.history.texts.get(this.main)??'';
     if(!canFlow(state)||!this.files.has('mogao.sty')||!source.includes('\\usepackage{mogao}'))return;
     if(this.history.texts.get(LAYOUT_STYLE_FILE)===PREVIOUS_LAYOUT_STYLE){this.history.commit('更新分页样式',[minimalPatch(LAYOUT_STYLE_FILE,PREVIOUS_LAYOUT_STYLE,LAYOUT_STYLE)]);this.version++;}
@@ -172,7 +197,7 @@ export class Project {
   private ensureReviewFile(){if(!this.files.has(REVIEW_FILE)){const text=JSON.stringify({version:1,documents:{}});this.addFile(REVIEW_FILE,Buffer.from(text),'UTF-8',text);}}
   writeBlock(id:string,content:RichNode,version:number){
     this.assertVersion(version);const matches=this.state().writing.filter(b=>b.id===id),block=matches[0];if(matches.length!==1||!block?.editable||!this.files.get(block.file)?.info.editable)throw new Error('此段落暂不支持页面编辑，或区域 ID 重复。');
-    const source=this.history.texts.get(block.file)!;const after='\n'+serializeRich(content)+'\n';
+    const source=this.history.texts.get(block.file)!;const body=serializeRich(content),after='\n'+(usesPageWeave(source)?shortTex(body):body)+'\n';
     if(this.history.commit('页面写作',[{file:block.file,...block.bodyRange,before:source.slice(block.bodyRange.from,block.bodyRange.to),after}]))this.version++;
     return this.state();
   }
@@ -201,22 +226,27 @@ export class Project {
     let text=source;
     // At an equal offset, replace/remove the old macro before inserting its predecessor.
     for(const edit of edits.sort((a,b)=>b.from-a.from||b.to-a.to))text=text.slice(0,edit.from)+edit.after+text.slice(edit.to);
-    let addTools=false,addLists=false,addDesign=false;
-    if(/\\PageWeave(?:Table|Paragraph|Heading|Drawing)\b/.test(text)){
+    let addTools=false,addLists=false,addDesign=false,addInline=false;
+    const modern=usesPageWeave(text),toolsFile=modern?'pageweave-tools.sty':'mogao-tools.sty',toolsStyle=modern?PAGEWEAVE_STYLES[toolsFile]:WRITING_TOOLS_STYLE;
+    if(/\\PageWeaveLink\b/.test(legacyTex(text))){
+      const existing=this.files.get(INLINE_STYLE_FILE);if(existing&&this.history.texts.get(INLINE_STYLE_FILE)!==INLINE_STYLE)throw new Error('工程已有不同的 pageweave-text.sty，请先在源码视图中检查。');
+      addInline=!existing;if(!modern&&!text.includes('\\usepackage{pageweave-text}'))text=text.replace('\\begin{document}','\\usepackage{pageweave-text}\n\\begin{document}');
+    }
+    if(/\\PageWeave(?:Table|Paragraph|Heading|Drawing)\b/.test(legacyTex(text))){
       const existing=this.files.get(DESIGN_STYLE_FILE);if(existing&&this.history.texts.get(DESIGN_STYLE_FILE)!==DESIGN_STYLE)throw new Error('工程已有不同的 pageweave-design.sty，请先在源码视图中检查。');
-      addDesign=!existing;if(!text.includes('\\usepackage{pageweave-design}'))text=text.replace('\\begin{document}','\\usepackage{pageweave-design}\n\\begin{document}');
+      addDesign=!existing;if(!modern&&!text.includes('\\usepackage{pageweave-design}'))text=text.replace('\\begin{document}','\\usepackage{pageweave-design}\n\\begin{document}');
     }
     if(parts.some(part=>/"type":"(?:bulletList|orderedList)"/.test(JSON.stringify(part.content)))){
       const existing=this.files.get(LIST_STYLE_FILE);
       if(existing&&this.history.texts.get(LIST_STYLE_FILE)!==LIST_STYLE)throw new Error('工程已有不同的列表样式文件，请先在源码视图中检查。');
       addLists=!existing;
-      if(!/\\usepackage(?:\[[^\]]*\])?\{pageweave-lists\}/.test(text))text=text.replace('\\begin{document}','\\usepackage{pageweave-lists}\n\\begin{document}');
+      if(!modern&&!/\\usepackage(?:\[[^\]]*\])?\{pageweave-lists\}/.test(text))text=text.replace('\\begin{document}','\\usepackage{pageweave-lists}\n\\begin{document}');
     }
     if(parts.some(part=>['"type":"flowImage"','"type":"table"','"type":"textStyle"'].some(type=>JSON.stringify(part.content).includes(type)))){
-      const tools=this.files.get('mogao-tools.sty');
-      if(tools&&this.history.texts.get('mogao-tools.sty')!==WRITING_TOOLS_STYLE)throw new Error('工程已有不同的 mogao-tools.sty，请在源码视图中处理后再插入图片或表格。');
+      const tools=this.files.get(toolsFile);
+      if(tools&&this.history.texts.get(toolsFile)!==toolsStyle)throw new Error('工程已有不同的 mogao-tools.sty，请在源码视图中处理后再插入图片或表格。');
       addTools=!tools;
-      if(!/\\usepackage(?:\[[^\]]*\])?\{mogao-tools\}/.test(text))text=text.replace('\\begin{document}','\\usepackage{mogao-tools}\n\\begin{document}');
+      if(!modern&&!/\\usepackage(?:\[[^\]]*\])?\{mogao-tools\}/.test(text))text=text.replace('\\begin{document}','\\usepackage{mogao-tools}\n\\begin{document}');
     }
     if(Buffer.byteLength(text)>5*1024*1024)throw new Error('单个源码文件不能超过 5 MB。');
     let reviewPatch;
@@ -225,9 +255,11 @@ export class Project {
       if(documentSource(document)!==serializeRich({type:'doc',content:parts.flatMap(part=>part.content.content??[])}))throw new Error('审阅记录与正文不一致，未保存此次修改。');
       reviewPatch=this.reviewPatch(document);
     }else if(stored&&text!==source)throw new Error('请在写作视图中同步审阅信息后修改正文。');
-    if(addTools)this.addFile('mogao-tools.sty',Buffer.from(WRITING_TOOLS_STYLE),'UTF-8',WRITING_TOOLS_STYLE);
+    if(addTools)this.addFile(toolsFile,Buffer.from(toolsStyle),'UTF-8',toolsStyle);
     if(addLists)this.addFile(LIST_STYLE_FILE,Buffer.from(LIST_STYLE),'UTF-8',LIST_STYLE);
     if(addDesign)this.addFile(DESIGN_STYLE_FILE,Buffer.from(DESIGN_STYLE),'UTF-8',DESIGN_STYLE);
+    if(addInline)this.addFile(INLINE_STYLE_FILE,Buffer.from(INLINE_STYLE),'UTF-8',INLINE_STYLE);
+    if(modern)text=shortTex(text);
     if(reviewPatch)this.ensureReviewFile();
     if(this.history.commit('连续写作',[minimalPatch(this.main,source,text),...(reviewPatch?[reviewPatch]:[])]))this.version++;
     return this.state();
@@ -238,7 +270,7 @@ export class Project {
     if(content!==null)this.history.texts.set(file,content);
   }
   addImage(bytes:Buffer,version:number){
-    this.assertVersion(version);const file='images/mogao-'+randomUUID()+'.png';this.addFile(file,bytes,'binary');this.version++;return {project:this.state(),src:file};
+    this.assertVersion(version);const file='images/pw-'+randomUUID()+'.png';this.addFile(file,bytes,'binary');this.version++;return {project:this.state(),src:file};
   }
   imageData(file:string){const data=this.files.get(file);if(!data||!/^\x89PNG/.test(data.bytes.subarray(0,4).toString('latin1'))&&!/^\xff\xd8/.test(data.bytes.subarray(0,2).toString('latin1')))throw new Error('图片不在当前工程内。');return `data:image/${data.bytes[0]===137?'png':'jpeg'};base64,${data.bytes.toString('base64')}`;}
   insertBlock(afterId:string|null,kind:'paragraph'|'equation'|'pageBreak',version:number){
@@ -246,7 +278,7 @@ export class Project {
     const at=block?.range.to??source.lastIndexOf('\\end{document}');if(at<0)throw new Error('未找到正文入口。');
     const id='block-'+randomUUID().slice(0,8);
     const content:RichNode=kind==='equation'?{type:'doc',content:[{type:'displayMath',attrs:{latex:'E=mc^2'}}]}:{type:'doc',content:[...(kind==='pageBreak'?[{type:'pageBreak'}]:[]),{type:'paragraph',attrs:{textAlign:'justify',lineHeight:'1.5'}}]};
-    this.history.commit(kind==='pageBreak'?'插入分页':kind==='equation'?'插入公式':'插入段落',[{file,from:at,to:at,before:'',after:'\n'+blockSource(id,content)+'\n'}]);this.version++;
+    this.history.commit(kind==='pageBreak'?'插入分页':kind==='equation'?'插入公式':'插入段落',[{file,from:at,to:at,before:'',after:'\n'+(usesPageWeave(source)?shortTex(blockSource(id,content)):blockSource(id,content))+'\n'}]);this.version++;
     return {project:this.state(),id};
   }
   deleteBlock(id:string,version:number){this.assertVersion(version);const block=this.state().writing.find(b=>b.id===id);if(!block)throw new Error('段落已变化');const source=this.history.texts.get(block.file)!;this.history.commit('删除段落',[{file:block.file,...block.range,before:source.slice(block.range.from,block.range.to),after:''}]);this.version++;return this.state();}
@@ -259,7 +291,7 @@ export class Project {
     this.assertVersion(version);if(!canFlow(this.state()))throw new Error('此工程的页眉页脚需要从源码设置。');
     const config=validateFurniture(value),source=this.history.texts.get(this.main)!;
     const existing=this.files.get(DESIGN_STYLE_FILE);if(existing&&this.history.texts.get(DESIGN_STYLE_FILE)!==DESIGN_STYLE)throw new Error('工程已有不同的页面设计样式，请先在源码视图中检查。');
-    let text=source;if(!text.includes('\\usepackage{pageweave-design}'))text=text.replace('\\begin{document}','\\usepackage{pageweave-design}\n\\begin{document}');
+    let text=source;if(!usesPageWeave(text)&&!text.includes('\\usepackage{pageweave-design}'))text=text.replace('\\begin{document}','\\usepackage{pageweave-design}\n\\begin{document}');
     text=writeFurniture(text,config);if(!existing)this.addFile(DESIGN_STYLE_FILE,Buffer.from(DESIGN_STYLE),'UTF-8',DESIGN_STYLE);
     if(this.history.commit('页眉页脚',[minimalPatch(this.main,source,text)]))this.version++;return this.state();
   }

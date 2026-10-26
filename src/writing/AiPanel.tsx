@@ -1,62 +1,112 @@
 import {useEffect,useRef,useState} from 'react';
 import type {Editor} from '@tiptap/react';
-import {Settings2,X} from 'lucide-react';
-import {AI_DEFAULT,AI_PROVIDERS,type AiStatus,type AiConfig,type AiMode,type AiMessage,type AiReply} from '../../core/ai';
+import {closeHistory} from '@tiptap/pm/history';
+import {TextSelection} from '@tiptap/pm/state';
+import type {ChainedCommands} from '@tiptap/core';
+import {ArrowUp,Check,FilePenLine,MessageSquare,Plus,Settings2,SlidersHorizontal,Square,X} from 'lucide-react';
+import {AI_DEFAULT,AI_PROVIDERS,formatDescription,type AiFormat,type AiStatus,type AiConfig,type AiMessage,type AiReply} from '../../core/ai';
+import {syncTextSelection} from './selection';
 import './ai.css';
 
 const api=window.workbench;
-export default function AiPanel({editor,onClose}:{editor:Editor|null;onClose():void}){
+type Anchor={doc:unknown;from:number;to:number;text:string};
+function formatChain(chain:ChainedCommands,f:AiFormat){
+  if(f.fontFamily)chain.setFontFamily(f.fontFamily);if(f.fontSize)chain.setFontSize(f.fontSize+'pt');if(f.color)chain.setColor(f.color);if(f.textAlign)chain.setTextAlign(f.textAlign);if(f.lineHeight)chain.updateAttributes('paragraph',{lineHeight:String(f.lineHeight)}).updateAttributes('heading',{lineHeight:String(f.lineHeight)});
+}
+type Suggestion={reply:AiReply;anchor:Anchor|null;inserted?:boolean;formatted?:boolean};
+export default function AiPanel({editor,open,onClose}:{editor:Editor|null;open:boolean;onClose():void}){
   const [status,setStatus]=useState<AiStatus|null>(null),[config,setConfig]=useState<AiConfig>(AI_DEFAULT),[settings,setSettings]=useState(false),[key,setKey]=useState('');
-  const [mode,setMode]=useState<AiMode>('chat'),[prompt,setPrompt]=useState(''),[context,setContext]=useState(false),[messages,setMessages]=useState<AiMessage[]>([]),[reply,setReply]=useState<AiReply|null>(null),[error,setError]=useState(''),[busy,setBusy]=useState(false);
-  const active=useRef<string|null>(null),mounted=useRef(true),anchor=useRef<{doc:unknown;from:number;to:number}|null>(null);
-  const selectionAnchor=useRef<{doc:unknown;from:number;to:number;text:string}|null>(null);
-  function rememberNativeSelection(){
-    if(!editor||editor.isDestroyed)return;const s=window.getSelection();
-    if(s?.anchorNode&&s.focusNode&&editor.view.dom.contains(s.anchorNode)&&editor.view.dom.contains(s.focusNode)&&!s.isCollapsed){const a=editor.view.posAtDOM(s.anchorNode,s.anchorOffset),b=editor.view.posAtDOM(s.focusNode,s.focusOffset),from=Math.min(a,b),to=Math.max(a,b);selectionAnchor.current={doc:editor.state.doc,from,to,text:editor.state.doc.textBetween(from,to,'\n')};}
+  const [prompt,setPrompt]=useState(''),[context,setContext]=useState(false),[messages,setMessages]=useState<AiMessage[]>([]),[suggestion,setSuggestion]=useState<Suggestion|null>(null),[error,setError]=useState(''),[busy,setBusy]=useState(false),[saving,setSaving]=useState(false),[,tick]=useState(0);
+  const active=useRef<string|null>(null),mounted=useRef(true),selection=useRef<Anchor|null>(null),conversation=useRef<HTMLDivElement>(null),input=useRef<HTMLTextAreaElement>(null);
+  function rememberSelection(){
+    if(!editor||editor.isDestroyed)return;syncTextSelection(editor.view);
+    const {from,to}=editor.state.selection;
+    selection.current={doc:editor.state.doc,from,to,text:editor.state.doc.textBetween(from,to,'\n')};tick(n=>n+1);
   }
+  useEffect(()=>{mounted.current=true;void api.aiStatus().then(s=>{if(!mounted.current)return;setStatus(s);setConfig(s);setSettings(!s.hasKey||!s.model);}).catch(fail);return()=>{mounted.current=false;if(active.current)void api.aiCancel(active.current);};},[]);
   useEffect(()=>{
-    if(!editor)return;const remember=()=>{const s=editor.state.selection;if(!s.empty)selectionAnchor.current={doc:editor.state.doc,from:s.from,to:s.to,text:editor.state.doc.textBetween(s.from,s.to,'\n')};};
-    const changed=()=>{if(selectionAnchor.current?.doc!==editor.state.doc)selectionAnchor.current=null;};
-    const dom=editor.view.dom;remember();editor.on('selectionUpdate',remember);editor.on('update',changed);dom.addEventListener('focusout',rememberNativeSelection);return()=>{editor.off('selectionUpdate',remember);editor.off('update',changed);dom.removeEventListener('focusout',rememberNativeSelection);};
-  },[editor]);
-  useEffect(()=>{mounted.current=true;void api.aiStatus().then(s=>{if(mounted.current){setStatus(s);setConfig(s);setSettings(!s.hasKey||!s.model);}}).catch(e=>setError(String(e)));return()=>{mounted.current=false;if(active.current)void api.aiCancel(active.current);};},[]);
-  const fail=(e:unknown)=>setError(String(e instanceof Error?e.message:e).replace(/^Error invoking remote method '[^']+': Error: /,''));
-  async function saveConfig(){setError('');try{const s=await api.aiConfigure(config,key||undefined);setStatus(s);setConfig(s);setKey('');setSettings(false);setMessages([]);setReply(null);}catch(e){fail(e);}}
-  async function send(){
-    if(!prompt.trim()||busy)return;setError('');setReply(null);
-    const selection=selectionAnchor.current?.doc===editor?.state.doc?selectionAnchor.current:null,selected=selection?.text??'';
-    if(mode==='format'&&!selected){setError('请先在文稿中选择要设置格式的文字。');return;}
-    if(context&&!selected){setError('请先选择要附带的文字，或取消附带选项。');return;}
-    anchor.current=selection;
-    const next=[...(mode==='chat'?messages:[]),{role:'user' as const,content:prompt.trim()}],id=crypto.randomUUID();active.current=id;setBusy(true);
-    try{const result=await api.aiRequest({id,mode,messages:next,...(context?{context:selected}:{})});if(!mounted.current)return;setReply(result);setMessages([...next,{role:'assistant',content:result.text}]);setPrompt('');}
-    catch(e){if(mounted.current)fail(e);}finally{if(mounted.current)setBusy(false);active.current=null;}
+    if(!editor||!open)return;
+    const update=()=>{const {from,to}=editor.state.selection;selection.current={doc:editor.state.doc,from,to,text:editor.state.doc.textBetween(from,to,'\n')};tick(n=>n+1);};
+    update();editor.on('selectionUpdate',update);editor.on('update',update);
+    return()=>{editor.off('selectionUpdate',update);editor.off('update',update);};
+  },[editor,open]);
+  useEffect(()=>{if(open)conversation.current?.scrollTo({top:conversation.current.scrollHeight});},[open,messages,busy,suggestion]);
+  function fail(value:unknown){if(mounted.current)setError(String(value instanceof Error?value.message:value).replace(/^Error invoking remote method '[^']+': Error: /,''));}
+  async function saveConfig(){
+    if(saving)return;setSaving(true);setError('');
+    try{const s=await api.aiConfigure(config,key||undefined);if(!mounted.current)return;setStatus(s);setConfig(s);setKey('');setSettings(false);setMessages([]);setSuggestion(null);}catch(e){fail(e);}finally{if(mounted.current)setSaving(false);}
   }
-  function apply(){
-    if(!editor||editor.isDestroyed||!reply)return;
+  async function send(){
+    if(!prompt.trim()||active.current)return;setError('');
+    const a=editor&&selection.current?.doc===editor.state.doc?selection.current:null;
+    if(context&&!a?.text){setError('请先选择要附带的文字，或取消附带选项。');return;}
+    const next=[...messages.slice(-36),{role:'user' as const,content:prompt.trim()}],id=crypto.randomUUID();
+    active.current=id;setBusy(true);setSuggestion(null);setMessages(next);setPrompt('');
     try{
-      if(reply.format){const a=anchor.current;if(!a||editor.state.doc!==a.doc)throw new Error('文稿已变化，请重新选取范围后生成排版建议。');
-        const f=reply.format,chain=editor.chain().focus().setTextSelection({from:a.from,to:a.to});
-        if(f.fontFamily)chain.setFontFamily(f.fontFamily);if(f.fontSize)chain.setFontSize(f.fontSize+'pt');if(f.color)chain.setColor(f.color);if(f.textAlign)chain.setTextAlign(f.textAlign);if(f.lineHeight)chain.updateAttributes('paragraph',{lineHeight:String(f.lineHeight)}).updateAttributes('heading',{lineHeight:String(f.lineHeight)});chain.run();
-      }else{const content=reply.text.split(/\n\s*\n/).filter(Boolean).map(text=>({type:'paragraph',content:[{type:'text',text}]}));editor.chain().focus().insertContentAt(editor.state.doc.content.size,content).run();}
-      setReply(null);
+      const result=await api.aiRequest({id,mode:'assistant',messages:next,hasSelection:!!a?.text,...(context?{context:a!.text}:{})});
+      if(!mounted.current)return;
+      const history=[result.text,result.draft,result.format?formatDescription(result.format):''].filter(Boolean).join('\n\n');
+      setMessages([...next,{role:'assistant',content:history}]);setSuggestion({reply:result,anchor:a});
+    }catch(e){fail(e);if(mounted.current){setPrompt(next.at(-1)!.content);setMessages(next.slice(0,-1));}}
+    finally{if(mounted.current)setBusy(false);active.current=null;}
+  }
+  function apply(kind:'insert'|'replace'|'append'|'format'){
+    if(!editor||editor.isDestroyed||!editor.isEditable||!suggestion)return;setError('');
+    try{
+      const {reply,anchor:a}=suggestion;
+      if(kind!=='append'&&(!a||editor.state.doc!==a.doc))throw new Error('文稿已变化，请重新生成建议，或将正文追加到文末。');
+      if((kind==='replace'||kind==='format')&&(!a||a.from===a.to))throw new Error('请先选择需要修改的文字。');
+      const chain=editor.chain().focus().command(({tr})=>{closeHistory(tr);return true;});
+      if(kind==='format'){
+        const f=reply.format;if(!f)return;chain.setTextSelection({from:a!.from,to:a!.to});
+        formatChain(chain,f);
+      }else{
+        if(!reply.draft)return;
+        const content=reply.draft.split(/\n\s*\n/).filter(Boolean).map(text=>({type:'paragraph',content:text.split('\n').flatMap((line,index)=>[...(index?[{type:'hardBreak'}]:[]),...(line?[{type:'text',text:line}]:[])])}));
+        chain.insertContentAt(kind==='append'?editor.state.doc.content.size:kind==='replace'?{from:a!.from,to:a!.to}:a!.to,content);
+        if(reply.format){const before=editor.state.doc;chain.command(({tr})=>{const from=before.content.findDiffStart(tr.doc.content),end=before.content.findDiffEnd(tr.doc.content);if(from===null||!end)return false;tr.setSelection(TextSelection.between(tr.doc.resolve(from),tr.doc.resolve(end.b)));return true;});formatChain(chain,reply.format);}
+      }
+      if(!chain.run())throw new Error('当前选区无法应用此建议。');editor.view.dispatch(closeHistory(editor.state.tr));
+      setSuggestion({...suggestion,...(kind==='format'?{formatted:true}:{inserted:true,formatted:!!reply.format})});
     }catch(e){fail(e);}
   }
-  return <aside className="ai-panel" aria-label="AI 助手" onPointerDownCapture={rememberNativeSelection}><header><strong>AI</strong><div><button aria-label="AI 设置" disabled={busy} onClick={()=>{setSettings(!settings);setError('');}}><Settings2 size={17}/></button><button aria-label="关闭 AI" onClick={onClose}><X size={17}/></button></div></header>
+  const reply=suggestion?.reply,validAnchor=!!editor&&suggestion?.anchor?.doc===editor.state.doc,hasRange=validAnchor&&suggestion!.anchor!.from<suggestion!.anchor!.to,canEdit=!!editor?.isEditable;
+  const selected=editor&&selection.current?.doc===editor.state.doc?selection.current.text:'',provider=AI_PROVIDERS.find(p=>p.id===status?.provider)?.name??'AI 服务';
+  const destination=status?.baseUrl?new URL(status.baseUrl).host:'';
+  return <aside className="ai-panel" aria-label="AI 助手" hidden={!open} onPointerDownCapture={rememberSelection}>
+    <header><strong><MessageSquare size={17}/>AI 助手</strong><div>
+      <button aria-label="新对话" title="新对话" disabled={busy||!messages.length} onClick={()=>{setMessages([]);setSuggestion(null);setError('');}}><Plus size={17}/></button>
+      <button aria-label="AI 设置" title="AI 设置" aria-pressed={settings} disabled={busy||saving} onClick={()=>{setSettings(!settings);setError('');}}><Settings2 size={17}/></button>
+      <button aria-label="关闭 AI" onClick={onClose}><X size={17}/></button>
+    </div></header>
     {settings?<div className="ai-settings">
-      <label>服务<select aria-label="AI 服务" value={config.provider} onChange={e=>{const preset=AI_PROVIDERS.find(p=>p.id===e.target.value)!;setConfig({...config,provider:preset.id,baseUrl:preset.baseUrl,model:''});setKey('');}}>{AI_PROVIDERS.map(p=><option key={p.id} value={p.id}>{p.name}</option>)}</select></label>
-      <label>API 地址<input aria-label="AI API 地址" value={config.baseUrl} onChange={e=>setConfig({...config,baseUrl:e.target.value})} placeholder="https://…" spellCheck={false}/></label>
-      <label>模型<input aria-label="AI 模型" value={config.model} onChange={e=>setConfig({...config,model:e.target.value})} placeholder="填写服务商提供的模型名称" spellCheck={false}/></label>
-      <label>API 密钥<input aria-label="AI API 密钥" type="password" autoComplete="off" value={key} onChange={e=>setKey(e.target.value)} placeholder={status?.hasKey&&config.provider===status.provider&&config.baseUrl===status.baseUrl?'已配置；留空保留':'输入密钥'}/></label>
-      <label className="ai-check"><input type="checkbox" checked={config.rememberKey} onChange={e=>setConfig({...config,rememberKey:e.target.checked})}/>在本机记住密钥</label>
+      <label>服务<select aria-label="AI 服务" disabled={saving} value={config.provider} onChange={e=>{const preset=AI_PROVIDERS.find(p=>p.id===e.target.value)!;setConfig({...config,provider:preset.id,baseUrl:preset.baseUrl,model:''});setKey('');}}>{AI_PROVIDERS.map(p=><option key={p.id} value={p.id}>{p.name}</option>)}</select></label>
+      <label>API 地址<input aria-label="AI API 地址" disabled={saving} value={config.baseUrl} onChange={e=>setConfig({...config,baseUrl:e.target.value})} placeholder="https://…" spellCheck={false}/></label>
+      <label>模型<input aria-label="AI 模型" disabled={saving} value={config.model} onChange={e=>setConfig({...config,model:e.target.value})} placeholder="模型名称" spellCheck={false}/></label>
+      <label>API 密钥<input aria-label="AI API 密钥" disabled={saving} type="password" autoComplete="off" value={key} onChange={e=>setKey(e.target.value)} placeholder={status?.hasKey&&config.provider===status.provider&&config.baseUrl===status.baseUrl?'已配置；留空保留':'输入密钥'}/></label>
+      <label className="ai-check"><input type="checkbox" disabled={saving} checked={config.rememberKey} onChange={e=>setConfig({...config,rememberKey:e.target.checked})}/>在本机记住密钥</label>
       {status&&!status.canRememberKey&&<p>系统密钥存储不可用，可取消记住密钥，仅在本次运行中使用。</p>}
-      <button className="primary-button" onClick={()=>void saveConfig()}>保存配置</button>
-      {status?.hasKey&&<button className="outline-button" onClick={()=>void api.aiConfigure(config,'').then(s=>{setStatus(s);setKey('');}).catch(fail)}>清除密钥</button>}
+      <button className="primary-button" disabled={saving} onClick={()=>void saveConfig()}>{saving?'正在保存…':'保存配置'}</button>
+      {status?.hasKey&&<button className="outline-button" disabled={saving} onClick={()=>{setSaving(true);void api.aiConfigure(config,'').then(s=>{setStatus(s);setKey('');}).catch(fail).finally(()=>setSaving(false));}}>清除密钥</button>}
     </div>:<>
-      <div className="ai-mode" role="tablist" aria-label="AI 功能">{([['chat','对话'],['draft','写文稿'],['format','排版']] as const).map(([m,label])=><button role="tab" aria-selected={mode===m} key={m} disabled={busy} onClick={()=>{setMode(m);setMessages([]);setReply(null);setError('');}}>{label}</button>)}</div>
-      <div className="ai-conversation" aria-live="polite">{messages.map((m,i)=><div key={i} className={'ai-message '+m.role}><span>{m.role==='user'?'提问':'AI'}</span><div>{m.content}</div></div>)}{busy&&<p role="status">正在生成…</p>}</div>
-      {reply&&mode!=='chat'&&<button className="outline-button ai-apply" disabled={!editor||!editor.isEditable} onClick={apply}>{reply.format?'应用到所选文字':'插入文末'}</button>}
-      <div className="ai-compose"><label className="ai-check"><input type="checkbox" checked={context} disabled={busy} onChange={e=>setContext(e.target.checked)}/>附带选中文字</label><textarea aria-label="AI 提问" value={prompt} onChange={e=>setPrompt(e.target.value)} placeholder={mode==='format'?'描述所选文字的字体、字号或段落格式':'输入要求'} disabled={busy} onKeyDown={e=>{if(e.ctrlKey&&e.key==='Enter'){e.preventDefault();void send();}}}/><div><button className="outline-button" disabled={busy||!messages.length} onClick={()=>{setMessages([]);setReply(null);}}>清空对话</button>{busy?<button className="outline-button" onClick={()=>active.current&&void api.aiCancel(active.current)}>停止</button>:<button className="primary-button" disabled={!prompt.trim()||!status?.hasKey||!status.model} onClick={()=>void send()}>发送</button>}</div><p>发送至 {AI_PROVIDERS.find(p=>p.id===status?.provider)?.name??'所选服务'}{status?.baseUrl?' · '+new URL(status.baseUrl).host:''}</p></div>
+      <div className="ai-conversation" ref={conversation} aria-busy={busy}>
+        {!messages.length&&!busy&&<div className="ai-empty"><div className="ai-empty-mark"><FilePenLine size={25}/></div><h3>从文稿开始</h3><div className="ai-suggestions">{[
+          [FilePenLine,'起草一段摘要','起草一段摘要：'],[SlidersHorizontal,'设置所选段落','将所选文字设为 12 磅、1.5 倍行距。'],
+        ].map(([Icon,label,value])=>{const I=Icon as typeof MessageSquare;return <button key={String(label)} onClick={()=>{setPrompt(String(value));input.current?.focus();}}><I size={16}/>{String(label)}</button>;})}</div></div>}
+        {messages.map((m,i)=><div key={i} className={'ai-message '+m.role}><div>{i===messages.length-1&&reply?reply.text:m.content}</div></div>)}
+        {busy&&<div className="ai-pending" role="status"><span/>正在生成…</div>}
+        {reply?.draft&&<section className="ai-proposal" aria-label="正文建议"><header><FilePenLine size={15}/><strong>正文建议</strong>{suggestion?.inserted&&<span><Check size={14}/>已插入</span>}</header><div className="ai-draft">{reply.draft}</div><div className="ai-proposal-actions">
+          <button className="primary-button" disabled={!canEdit||!validAnchor||suggestion?.inserted} onClick={()=>apply('insert')}>插入光标处</button><button className="outline-button" disabled={!canEdit||!hasRange||suggestion?.inserted} onClick={()=>apply('replace')}>替换选区</button><button disabled={!canEdit||suggestion?.inserted} onClick={()=>apply('append')}>追加文末</button>
+        </div></section>}
+        {reply?.format&&<section className="ai-proposal" aria-label="排版建议"><header><SlidersHorizontal size={15}/><strong>排版建议</strong>{suggestion?.formatted&&<span><Check size={14}/>已应用</span>}</header><p>{formatDescription(reply.format)}</p><div className="ai-proposal-actions">{reply.draft?<span>随正文一起应用</span>:<button className="primary-button" disabled={!canEdit||!hasRange||suggestion?.formatted} onClick={()=>apply('format')}>应用到选区</button>}</div></section>}
+        {suggestion&&!validAnchor&&(reply?.draft||reply?.format)&&!suggestion.inserted&&!suggestion.formatted&&<p className="ai-stale" role="status">文稿已变化，原选区建议已停用。</p>}
+      </div>
+      <div className="ai-compose">
+        <label className={'ai-context '+(context?'attached':'')} title={selected?'所选文字：'+selected.length+' 字符':'仅在勾选后发送所选文字'}><input type="checkbox" aria-label="附带选区" checked={context} disabled={busy} onChange={e=>setContext(e.target.checked)}/>附带选区{selected&&<span>{selected.length} 字符</span>}</label>
+        <div className="ai-input-box"><textarea ref={input} aria-label="AI 提问" value={prompt} onChange={e=>setPrompt(e.target.value)} placeholder="讨论、写作或调整格式…" disabled={busy} onKeyDown={e=>{if((e.ctrlKey||e.metaKey)&&e.key==='Enter'&&!e.nativeEvent.isComposing){e.preventDefault();void send();}}}/>
+          <div className="ai-compose-actions"><button className="ai-destination" title={destination} onClick={()=>setSettings(true)} disabled={busy}>{provider}<span>{status?.model||'配置服务'}</span></button>{busy?<button className="ai-send" aria-label="停止生成" onClick={()=>active.current&&void api.aiCancel(active.current)}><Square size={14}/></button>:<button className="ai-send" aria-label="发送" title="发送 · Ctrl+Enter" disabled={!prompt.trim()||!status?.hasKey||!status.model} onClick={()=>void send()}><ArrowUp size={18}/></button>}</div>
+        </div>
+      </div>
     </>}{error&&<p className="ai-error" role="alert">{error}</p>}
   </aside>;
 }

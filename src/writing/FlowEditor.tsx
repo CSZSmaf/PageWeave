@@ -19,6 +19,7 @@ import {WritingSearch,writingSearch} from '../search/WritingSearch';
 import type {SearchController} from '../search/SearchController';
 import {WritingListItem,ListKeys} from './Lists';
 import {Review} from './Review';
+import {InlineMarks} from './InlineMarks';
 
 interface Props{content:RichNode;layout:PaperLayout;zoom:number;readOnly?:boolean;onReady(editor:Editor|null):void;onChange(doc:RichNode):void;onSelection():void;onPages(pages:number):void;onPlan?(plan:PagePlan):void;onMath(request:MathRequest):void;onDrawing(request:DrawingRequest):void;onComment?(id:string):void;onSearchReady(search:SearchController|null):void}
 const SourceId=Extension.create({name:'writingSourceId',addGlobalAttributes(){return [{types:['paragraph','heading','displayMath','pageBreak','flowImage','drawing','table','bulletList','orderedList'],attributes:{sourceId:{default:null,parseHTML:element=>element.getAttribute('data-block'),renderHTML:attrs=>attrs.sourceId?{'data-block':attrs.sourceId}:{}}}}];}});
@@ -28,7 +29,7 @@ export default function FlowEditor(props:Props){
   const [pages,setPages]=useState(1),compositionPending=useRef(false);
   const editor=useEditor({
     extensions:[StarterKit.configure({blockquote:false,listItem:false,code:false,codeBlock:false,horizontalRule:false,link:false,trailingNode:{node:'paragraph'},heading:{levels:[1,2,3]}}),WritingListItem,ListKeys,TextStyleKit.configure({lineHeight:false,backgroundColor:false}),TextAlign.configure({types:['heading','paragraph','flowImage','drawing'],defaultAlignment:'justify'}),BlockSpacing,SourceId,mathNode(false,r=>ref.current.onMath(r)),mathNode(true,r=>ref.current.onMath(r)),PageBreak,FlowImage,drawingNode(request=>ref.current.onDrawing(request)),AdvancedTable,AdvancedRow,AdvancedCell,AdvancedHeader,
-      Review,WritingSearch,pagination(()=>ref.current.layout,n=>{setPages(n);ref.current.onPages(n);},plan=>ref.current.onPlan?.(plan)),
+      ...InlineMarks,Review,WritingSearch,pagination(()=>ref.current.layout,n=>{setPages(n);ref.current.onPages(n);},plan=>ref.current.onPlan?.(plan)),
       Extension.create({name:'continuousWritingKeys',priority:1000,addKeyboardShortcuts(){return {
         'Mod-Enter':()=>this.editor.isActive('table')||this.editor.isActive('listItem')||this.editor.commands.insertContent([{type:'pageBreak'},{type:'paragraph'}]),
         'Mod-End':()=>this.editor.chain().command(({tr})=>{tr.setSelection(Selection.atEnd(tr.doc));return true;}).scrollIntoView().run(),

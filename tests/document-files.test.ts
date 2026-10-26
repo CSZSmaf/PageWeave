@@ -19,9 +19,9 @@ test('打开选中的 tex 和依赖，不加载相邻的其他文稿；支持新
  const before=p.history.texts.get(p.main),version=p.version;await assert.rejects(p.sourceWithDependencies(p.main,before+'\n\\input{../outside}',version),/上级目录/);assert.equal(p.history.texts.get(p.main),before);assert.equal(p.version,version);
 });
 test('新建为空白 tex，可使用中文文件名，不覆盖同名文件或自定义样式',async t=>{
- const root=await directory(t),p=await Project.createDocument(path.join(root,'未命名'),path.resolve('examples/writing'));assert.equal(p.main,'未命名.tex');assert.ok(!p.history.texts.get(p.main)!.includes('入门教程'));assert.ok(p.files.has('mogao.sty'));
+ const root=await directory(t),p=await Project.createDocument(path.join(root,'未命名'),path.resolve('examples/writing'));assert.equal(p.main,'未命名.tex');assert.ok(!p.history.texts.get(p.main)!.includes('入门教程'));assert.ok(p.files.has('pageweave.sty'));
  await assert.rejects(Project.createDocument(path.join(root,'未命名.tex'),path.resolve('examples/writing')),/已存在/);
- await fs.writeFile(path.join(root,'mogao.sty'),'custom');await assert.rejects(Project.createDocument(path.join(root,'另一个.tex'),path.resolve('examples/writing')),/已有不同/);assert.equal(await fs.readFile(path.join(root,'mogao.sty'),'utf8'),'custom');
+ await fs.writeFile(path.join(root,'pageweave.sty'),'custom');await assert.rejects(Project.createDocument(path.join(root,'另一个.tex'),path.resolve('examples/writing')),/已有不同/);assert.equal(await fs.readFile(path.join(root,'pageweave.sty'),'utf8'),'custom');
 });
 test('真实重命名保留正文、批注、修订和撤销重做，拒绝同名及外部修改',async t=>{
  const root=await directory(t),p=await Project.createDocument(path.join(root,'original.tex'),path.resolve('examples/writing'));

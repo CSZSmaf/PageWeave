@@ -1,5 +1,6 @@
 import {promises as fs} from 'node:fs';
 import path from 'node:path';
+import {legacyTex} from './tex-names';
 
 /** A file selection includes its local TeX dependencies, never unrelated neighbouring documents. */
 export async function documentFiles(root:string,main:string,overrides?:Map<string,string>){
@@ -12,7 +13,8 @@ export async function documentFiles(root:string,main:string,overrides?:Map<strin
     const info=await fs.stat(real);if(!info.isFile())return false;
     if(found.size>=3000||(size+=info.size)>300*1024*1024)throw new Error('文稿及资源最多支持 3000 个文件、总计 300 MB。');found.add(name);
     if(!/\.(tex|sty|cls|cfg)$/i.test(name)||info.size>5*1024*1024)return true;
-    const source=(overrides?.get(name)??await fs.readFile(real,'utf8')).replace(/(?<!\\)%[^\r\n]*/g,'');
+    const source=legacyTex(overrides?.get(name)??await fs.readFile(real,'utf8')).replace(/(?<!\\)%[^\r\n]*/g,'');
+    if(path.basename(name)==='pageweave.sty')await add(path.join(path.dirname(name),'pw.sty'));
     const imageDirs=[...source.matchAll(/\\graphicspath\s*\{((?:\s*\{[^{}]*\}\s*)+)\}/g)].flatMap(m=>[...m[1].matchAll(/\{([^{}]*)\}/g)].map(p=>p[1]));
     const commands=/\\(input|include|subfile|includegraphics\*?|MogaoImage|usepackage|RequirePackage|documentclass|LoadClass|bibliography|addbibresource|bibliographystyle|lstinputlisting|verbatiminput)\s*(?:\[[^\]]*\]\s*)?\{([^{}]+)\}/g;
     for(const match of source.matchAll(commands)){

@@ -1,5 +1,6 @@
 import {escapeText} from './writing';
 import {bounded,hexColor} from './table-design';
+import {legacyTex,shortTex,usesPageWeave} from './tex-names';
 export interface PageFurniture {header:[string,string,string];footer:[string,string,string];fontSize:number;color:string;headerLine:boolean;footerLine:boolean;hideFirst:boolean}
 export const defaultFurniture=():PageFurniture=>({header:['','',''],footer:['','{page}',''],fontSize:9,color:'#526178',headerLine:false,footerLine:false,hideFirst:false});
 export function validateFurniture(value:unknown):PageFurniture {
@@ -11,6 +12,6 @@ export function decodeMetadata(value:string){if(value.length>1000000||!/^([a-f0-
 const marker=/% PageWeave header-footer begin\r?\n[\s\S]*?% PageWeave header-footer end/;
 const field=(text:string)=>text.split(/(\{page\}|\{pages\})/).map(part=>part==='{page}'?'\\thepage':part==='{pages}'?'\\pageref{LastPage}':escapeText(part)).join('');
 export function furnitureSource(value:PageFurniture){const v=validateFurniture(value);return `% PageWeave header-footer begin\n% data: ${encodeMetadata(v)}\n\\PageWeavePageStyle{${v.fontSize}}{${v.color.slice(1)}}{${v.headerLine?1:0}}{${v.footerLine?1:0}}{${v.hideFirst?1:0}}\n\\PageWeaveHeader${v.header.map(text=>'{'+field(text)+'}').join('')}\n\\PageWeaveFooter${v.footer.map(text=>'{'+field(text)+'}').join('')}\n% PageWeave header-footer end`;}
-export function readFurniture(source:string):PageFurniture|null{const block=marker.exec(source)?.[0];if(!block)return null;const hex=/% data: ([a-f\d]+)/i.exec(block)?.[1];if(!hex)return null;try{const value=validateFurniture(decodeMetadata(hex));return furnitureSource(value)===block.replaceAll('\r\n','\n')?value:null;}catch{return null;}}
-export function writeFurniture(source:string,value:PageFurniture){const block=marker.exec(source);if(block&&!readFurniture(source))throw new Error('页眉页脚源码已被手动修改，请先在源码视图中检查。');return block?source.replace(marker,furnitureSource(value)):source.replace('\\begin{document}',furnitureSource(value)+'\n\\begin{document}');}
+export function readFurniture(source:string):PageFurniture|null{const block=marker.exec(source)?.[0];if(!block)return null;const hex=/% data: ([a-f\d]+)/i.exec(block)?.[1];if(!hex)return null;try{const value=validateFurniture(decodeMetadata(hex));return furnitureSource(value)===legacyTex(block).replaceAll('\r\n','\n')?value:null;}catch{return null;}}
+export function writeFurniture(source:string,value:PageFurniture){const block=marker.exec(source);if(block&&!readFurniture(source))throw new Error('页眉页脚源码已被手动修改，请先在源码视图中检查。');const next=usesPageWeave(source)?shortTex(furnitureSource(value)):furnitureSource(value);return block?source.replace(marker,next):source.replace('\\begin{document}',next+'\n\\begin{document}');}
 export function furnitureText(value:string,page:number,total:number){return value.replaceAll('{pages}',String(total)).replaceAll('{page}',String(page));}

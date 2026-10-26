@@ -3,7 +3,7 @@ import type {Mark} from '@tiptap/pm/model';
 import {closeHistory} from '@tiptap/pm/history';
 import type {Editor} from '@tiptap/core';
 import {FONTS} from '../../core/writing';
-const textMarks=new Set(['bold','italic','underline','strike','textStyle']);
+const textMarks=new Set(['bold','italic','underline','strike','textStyle','superscript','subscript']);
 export type TextFormat={type:string;attrs:Record<string,unknown>}[];
 export function readTextFormat(state:EditorState):TextFormat {
   let marks:readonly Mark[]|undefined;

@@ -1,0 +1,29 @@
+\NeedsTeXFormat{LaTeX2e}
+\ProvidesPackage{pageweave-base}[2026/10/24 PageWeave writing]
+\RequirePackage{fontspec,xeCJK,xcolor,amsmath,amssymb,setspace,ragged2e,etoolbox}
+\RequirePackage[normalem]{ulem}
+\RequirePackage{zref-savepos,zref-abspage}
+\setmainfont{Times New Roman}
+\setCJKmainfont{SimSun}[AutoFakeBold=2.5,AutoFakeSlant=.2]
+\makeatletter
+\zref@addprops{savepos}{abspage}
+\zref@newprop{mgheight}{\number\paperheight}
+\zref@newprop{mgwidth}{\number\textwidth}
+\zref@newprop{mgleft}{\number\dimexpr 1in+\oddsidemargin\relax}
+\zref@newprop{mgtop}{\number\dimexpr 1in+\topmargin+\headheight+\headsep\relax}
+\zref@newprop{mgsize}{\number\dimexpr\f@size pt\relax}
+\zref@addprops{savepos}{mgheight,mgwidth,mgleft,mgtop,mgsize}
+\makeatother
+\newif\ifMogaoMarked
+\newcommand{\MogaoStart}{\ifMogaoMarked\else\zsavepos{mg-\MogaoId-start}\global\MogaoMarkedtrue\fi}
+\newcommand{\MogaoBlock}[2]{\par\begingroup\def\MogaoId{#1}\global\MogaoMarkedfalse #2\par\zsavepos{mg-#1-end}\endgroup\par\addvspace{8pt}}
+\newcommand{\MogaoPara}[3]{\par\begingroup\setstretch{#2}\setlength{\parindent}{0pt}\csname MogaoAlign#1\endcsname\noindent\MogaoStart #3\par\endgroup}
+\newcommand{\MogaoAlignleft}{\RaggedRight}
+\newcommand{\MogaoAlignright}{\RaggedLeft}
+\newcommand{\MogaoAligncenter}{\centering}
+\newcommand{\MogaoAlignjustify}{\justifying}
+\newcommand{\MogaoText}[4]{\begingroup\IfFontExistsTF{#1}{\fontspec[AutoFakeBold=2.5,AutoFakeSlant=.2]{#1}}{}\ifboolexpr{test {\ifstrequal{#1}{SimSun}} or test {\ifstrequal{#1}{SimHei}} or test {\ifstrequal{#1}{Microsoft YaHei}} or test {\ifstrequal{#1}{KaiTi}} or test {\ifstrequal{#1}{FangSong}}}{\CJKfontspec[AutoFakeBold=2.5,AutoFakeSlant=.2]{#1}}{}\fontsize{#2}{\dimexpr #2pt*3/2\relax}\selectfont\color[HTML]{#3}#4\endgroup}
+\newcommand{\MogaoHeading}[3]{\par\begingroup\bfseries\color[HTML]{2463C7}\ifnum#1=1\fontsize{22}{31}\selectfont\else\ifnum#1=2\fontsize{17}{25}\selectfont\else\fontsize{14}{21}\selectfont\fi\fi\csname MogaoAlign#2\endcsname\noindent\MogaoStart #3\par\endgroup}
+\newcommand{\MogaoInlineMath}[1]{\ensuremath{#1}}
+\newcommand{\MogaoEquation}[1]{\par\noindent\MogaoStart\hfill$\displaystyle #1$\hfill\null\par}
+\newcommand{\MogaoLineBreak}{\unskip\\\strut}

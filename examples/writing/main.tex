@@ -1,41 +1,40 @@
 % 使用 XeLaTeX 编译。
 \documentclass[a4paper,12pt]{article}
 \usepackage[margin=25mm]{geometry}
-\usepackage{mogao}
-\usepackage{pageweave-layout}
+\usepackage{pageweave}
 \pagestyle{plain}
 \begin{document}
-\MogaoBlock{title}{
-\MogaoHeading{1}{left}{入门教程}
+\PWBlock{title}{
+\PWHeading{1}{left}{入门教程}
 }
-\MogaoBlock{intro}{
-\MogaoHeading{2}{left}{输入与格式}
-\MogaoPara{left}{1.5}{点击正文输入文字。Enter 分段，Shift+Enter 换行，文字自动换行和分页。在“开始”中设置字体、字号、颜色和段落格式，或插入项目符号和编号列表。列表中按 Tab 缩进，Shift+Tab 减少缩进。}
+\PWBlock{intro}{
+\PWHeading{2}{left}{输入与格式}
+\PWPara{left}{1.5}{点击正文输入文字。Enter 分段，Shift+Enter 换行，文字自动换行和分页。在“开始”中设置字体、字号、颜色和段落格式，或插入项目符号和编号列表。列表中按 Tab 缩进，Shift+Tab 减少缩进。}
 }
-\MogaoBlock{section-one}{
-\MogaoHeading{2}{left}{公式}
+\PWBlock{section-one}{
+\PWHeading{2}{left}{公式}
 }
-\MogaoBlock{paragraph-one}{
-\MogaoPara{left}{1.5}{在“插入”中选择行内公式或独立公式。行内公式与正文同排，例如 \MogaoInlineMath{E=mc^2}。独立公式单独占一行：}
+\PWBlock{paragraph-one}{
+\PWPara{left}{1.5}{在“插入”中选择行内公式或独立公式。行内公式与正文同排，例如 \PWMath{E=mc^2}。独立公式单独占一行：}
 }
-\MogaoBlock{equation-one}{
-\MogaoEquation{a^2+b^2=c^2}
+\PWBlock{equation-one}{
+\PWEquation{a^2+b^2=c^2}
 }
-\MogaoBlock{paragraph-two}{
-\MogaoPara{left}{1.5}{点击公式进行编辑。“重建公式”生成预览，“应用公式”保存修改。}
+\PWBlock{paragraph-two}{
+\PWPara{left}{1.5}{点击公式进行编辑。“重建公式”生成预览，“应用公式”保存修改。}
 }
-\MogaoBlock{section-two}{
-\MogaoHeading{2}{left}{图片和表格}
+\PWBlock{section-two}{
+\PWHeading{2}{left}{图片和表格}
 }
-\MogaoBlock{paragraph-three}{
-\MogaoPara{left}{1.5}{在“插入”中选择图片或表格。选中图片后调整宽度和对齐方式。点击表格后增删行列，按 Tab 切换单元格。}
+\PWBlock{paragraph-three}{
+\PWPara{left}{1.5}{在“插入”中选择图片或表格。选中图片后调整宽度和对齐方式。点击表格后增删行列，按 Tab 切换单元格。}
 }
-\MogaoBlock{search}{
-\MogaoHeading{2}{left}{查找与审阅}
-\MogaoPara{left}{1.5}{Ctrl+F 查找，Ctrl+H 替换。Enter 查找下一处，Shift+Enter 查找上一处，Esc 关闭。Ctrl+Alt+M 为选中文字添加批注。在“审阅”中开启修订，查看修改前后的内容，接受或拒绝修改。}
+\PWBlock{search}{
+\PWHeading{2}{left}{查找与审阅}
+\PWPara{left}{1.5}{Ctrl+F 查找，Ctrl+H 替换。Enter 查找下一处，Shift+Enter 查找上一处，Esc 关闭。Ctrl+Alt+M 为选中文字添加批注。在“审阅”中开启修订，查看修改前后的内容，接受或拒绝修改。}
 }
-\MogaoBlock{saving}{
-\MogaoHeading{2}{left}{保存与导出}
-\MogaoPara{left}{1.5}{文稿会自动保存，Ctrl+S 可立即保存，Ctrl+Shift+S 另存为独立工程。切换到 PDF 查看排版，切换到源码编辑 LaTeX。在“导出”中保存 PDF 或 LaTeX 工程。“新建”创建空白文稿。}
+\PWBlock{saving}{
+\PWHeading{2}{left}{保存与导出}
+\PWPara{left}{1.5}{文稿会自动保存，Ctrl+S 可立即保存，Ctrl+Shift+S 另存为独立工程。切换到 PDF 查看排版，切换到源码编辑 LaTeX。在“导出”中保存 PDF 或 LaTeX 工程。“新建”创建空白文稿。}
 }
 \end{document}

@@ -59,6 +59,7 @@ export interface WorkbenchApi {
   insertBlock(afterId:string|null,kind:'paragraph'|'equation'|'pageBreak',version:number):Promise<{project:ProjectState;id:string}>;
   deleteBlock(id:string,version:number):Promise<ProjectState>;
   pageSettings(margin:number,paper:string,landscape:boolean,version:number):Promise<ProjectState>;
+  pageFurniture(value:import('./page-furniture').PageFurniture,version:number):Promise<ProjectState>;
   source(file: string, text: string, version: number): Promise<ProjectState>;
   width(id: string, value: number, unit: string, version: number): Promise<ProjectState>;
   undo(version: number): Promise<ProjectState>;

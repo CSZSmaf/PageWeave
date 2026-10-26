@@ -9,7 +9,7 @@ import 'katex/dist/katex.min.css';
 import type {RichNode} from '../../core/writing';
 export interface MathRequest{latex:string;display:boolean;commit(latex:string):void}
 interface Props{content:RichNode;onReady(editor:Editor|null):void;onChange():void;onFinish():void;onMath(request:MathRequest):void}
-export const BlockSpacing=Extension.create({name:'blockSpacing',addGlobalAttributes(){return [{types:['paragraph','heading'],attributes:{lineHeight:{default:'1.5',parseHTML:element=>element.style.lineHeight||'1.5',renderHTML:attrs=>({style:`line-height:${attrs.lineHeight}`})}}}];}});
+export const BlockSpacing=Extension.create({name:'blockSpacing',addGlobalAttributes(){return [{types:['paragraph','heading'],attributes:{lineHeight:{default:'1.5',parseHTML:element=>element.style.lineHeight||'1.5',renderHTML:attrs=>({style:`line-height:${attrs.lineHeight}`})},spacingBefore:{default:null,parseHTML:element=>element.getAttribute('data-space-before'),renderHTML:attrs=>attrs.spacingBefore!=null?{'data-space-before':attrs.spacingBefore,style:`margin-top:${Math.max(0,Math.min(120,Number(attrs.spacingBefore)))}pt`}:{}},spacingAfter:{default:null,parseHTML:element=>element.getAttribute('data-space-after'),renderHTML:attrs=>attrs.spacingAfter!=null?{'data-space-after':attrs.spacingAfter,style:`margin-bottom:${Math.max(0,Math.min(120,Number(attrs.spacingAfter)))}pt`}:{}}}}];}});
 export function mathNode(display:boolean,onMath:(request:MathRequest)=>void){return Node.create({
   name:display?'displayMath':'inlineMath',group:display?'block':'inline',inline:!display,atom:true,
   addAttributes(){return {latex:{default:'x'}};},

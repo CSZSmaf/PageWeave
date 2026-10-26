@@ -17,6 +17,13 @@ import SearchPanel,{type SearchRequest} from '../search/SearchPanel';
 import type {SearchController} from '../search/SearchController';
 import './writing.css';
 import './quick-tools.css';
+import './design.css';
+import {ParagraphDialog,TableProperties,FurnitureDialog} from './DesignDialogs';
+import DrawingDialog from './DrawingDialog';
+import {emptyDiagram,validateDiagram} from '../../core/drawing';
+import {defaultFurniture,readFurniture} from '../../core/page-furniture';
+import {tableContext} from './AdvancedTable';
+import type {DrawingRequest} from './DrawingNode';
 import {CommandPalette,GoToDialog,type EditorCommand} from './QuickTools';
 import {documentOutline} from './Navigation';
 import {captureTextFormat,paintTextFormat,type TextFormat} from './FormatPainter';
@@ -28,18 +35,14 @@ import DocumentMenu from './DocumentMenu';
 import {documentFileName} from '../../core/file-name';
 import brandIcon from '../../assets/pageweave.png';
 
+import {syncTextSelection} from './selection';
+
 const api=window.workbench;
-function syncSelection(e:Editor){
-  // The browser may report selectionchange after a fast toolbar or shortcut action.
-  const selection=window.getSelection();
-  if(selection?.anchorNode&&selection.focusNode&&e.view.dom.contains(selection.anchorNode)&&e.view.dom.contains(selection.focusNode)){
-    const from=e.view.posAtDOM(selection.anchorNode,selection.anchorOffset),to=e.view.posAtDOM(selection.focusNode,selection.focusOffset);
-    if(from!==e.state.selection.anchor||to!==e.state.selection.head)e.commands.setTextSelection({from,to});
-  }
-}
+function syncSelection(e:Editor){syncTextSelection(e.view);}
 
 export default function WritingApp(){
   const [recovery,setRecovery]=useState<RecoveryInfo|null>(null),[recovering,setRecovering]=useState(false),[saveStatus,setSaveStatus]=useState<SaveStatus>('saved');
+  const [paragraphDialog,setParagraphDialog]=useState(false),[tableProperties,setTableProperties]=useState(false),[furnitureDialog,setFurnitureDialog]=useState(false),[drawingRequest,setDrawingRequest]=useState<DrawingRequest|null>(null);
   const [aiOpen,setAiOpen]=useState(false);
   const [openMenu,setOpenMenu]=useState(false);
   const [recent,setRecent]=useState<RecentDocument[]>([]),[palette,setPalette]=useState(false),[goTo,setGoTo]=useState(false);
@@ -153,6 +156,8 @@ export default function WritingApp(){
     operation(e);e.commands.focus();tick();
   };
   const equation=(display:boolean)=>{const e=editor.current;if(!e)return;setMath({latex:'',display,commit:latex=>{setView('write');e.chain().focus().insertContent({type:display?'displayMath':'inlineMath',attrs:{latex}}).run();}});};
+  const insertDrawing=()=>{const e=editor.current;if(!e)return;syncSelection(e);const selection=e.state.selection;setDrawingRequest({drawing:emptyDiagram(),commit:drawing=>{e.chain().setTextSelection(selection).insertContent([{type:'drawing',attrs:{drawing:validateDiagram(drawing),width:90,textAlign:'center'}},{type:'paragraph'}]).run();}});};
+  const editDrawing=()=>{const e=editor.current;if(!e)return;const pos=e.state.selection.from,node=e.state.doc.nodeAt(pos);if(node?.type.name!=='drawing')return;setDrawingRequest({drawing:validateDiagram(node.attrs.drawing),commit:drawing=>{if(e.state.doc.nodeAt(pos)!==node)throw new Error('绘图已变化，请重新打开。');e.commands.command(({tr})=>{tr.setNodeMarkup(pos,undefined,{...node.attrs,drawing:validateDiagram(drawing)});return true;});}});};
   const importImage=(file:File)=>run(async()=>{
     if(file.size>20*1024*1024)throw new Error('请选择 20 MB 以内的图片。');
     const bytes=new Uint8Array(await file.arrayBuffer());let image:Awaited<ReturnType<typeof api.importImage>>|undefined;
@@ -212,6 +217,9 @@ export default function WritingApp(){
     {id:'image',label:'插入图片',keywords:'insert image',disabled:!enabled||view!=='write'||e?.isActive('table')||e?.isActive('listItem'),run:()=>imageInput.current?.click()},
     {id:'table',label:'插入表格',keywords:'insert table',disabled:!enabled||view!=='write'||e?.isActive('table')||e?.isActive('listItem'),run:()=>setTableDialog(true)},
     {id:'formula',label:'插入行内公式',keywords:'insert math equation',disabled:!enabled||view!=='write',run:()=>equation(false)},
+    {id:'drawing',label:'插入图形或流程图',keywords:'drawing shapes diagram flowchart',disabled:!enabled||view!=='write'||e?.isActive('table')||e?.isActive('listItem'),run:insertDrawing},
+    {id:'paragraph',label:'段落设置',keywords:'paragraph spacing',disabled:!enabled,run:()=>setParagraphDialog(true)},
+    {id:'furniture',label:'页眉页脚',keywords:'header footer page number',disabled:!enabled,run:()=>setFurnitureDialog(true)},
     {id:'layout',label:'页面设置',keywords:'layout margins',disabled:!enabled,run:openLayout},
     {id:'comment',label:'新建批注',shortcut:'Ctrl+Alt+M',keywords:'comment',disabled:!enabled||view!=='write',run:newComment},
     {id:'review',label:'审阅修订',keywords:'review',disabled:!supported,run:()=>void openReview('changes')},
@@ -235,7 +243,7 @@ export default function WritingApp(){
     if(['o','n','g'].includes(key)){event.preventDefault();event.stopPropagation();if(key==='g'){if(destinationMax)setGoTo(true);}else void switchProject(key==='o'?'open':'newDocument');}
   };window.addEventListener('keydown',key,true);return()=>window.removeEventListener('keydown',key,true);});
   const sourceReviewLocked=reviewLocked(view==='source'?project?.reviewDocument:e?reviewSnapshot(e.state.doc).doc:null);
-  const context=view==='source'?'':e?.isActive('flowImage')?'image':e?.isActive('table')?'table':'';
+  const context=view==='source'?'':e?.isActive('flowImage')?'image':e?.isActive('table')?'table':e?.isActive('drawing')?'drawing':'';
   useEffect(()=>{if(context!==previousContext.current){setRibbonTab(tab=>tab==='review'?tab:context as RibbonTab||'home');previousContext.current=context;}},[context]);
   const count=useMemo(()=>supported?countWords(documentText(view==='source'?flowDocument(project!.writing):e?.getJSON() as RichNode??seed??{type:'doc'})):null,[supported,view,project?.writing,e?.state.doc,seed]);
   const selectionCount=view==='write'&&e&&!e.state.selection.empty?countWords(documentText({type:'doc',content:e.state.doc.slice(e.state.selection.from,e.state.selection.to).content.toJSON()})).words:0;
@@ -249,7 +257,7 @@ export default function WritingApp(){
     <header className="writer-header">
       <div className="brand"><img className="brand-mark" src={brandIcon} alt=""/><span>PageWeave</span></div>
       <DocumentMenu name={documentName} path={project.root+'/'+project.main} dirty={!!dirty} disabled={switching} onRename={renameDocument} onSaveAs={()=>void saveAs()} onReveal={()=>void run(()=>api.reveal())}/>
-      {view!=='source'&&<nav className="ribbon-tabs" role="tablist" aria-label="功能区">{([['home','开始'],['insert','插入'],['layout','布局'],['review','审阅'],...(context?[[context,context==='image'?'图片':'表格']]:[])] as [RibbonTab,string][]).map(([tab,label])=><button key={tab} role="tab" aria-selected={ribbonTab===tab} className={ribbonTab===tab?'on':''} onMouseDown={ev=>ev.preventDefault()} onClick={()=>tab==='review'?void openReview('changes'):setRibbonTab(tab)}>{label}</button>)}</nav>}
+      {view!=='source'&&<nav className="ribbon-tabs" role="tablist" aria-label="功能区">{([['home','开始'],['insert','插入'],['layout','布局'],['review','审阅'],...(context?[[context,context==='image'?'图片':context==='drawing'?'图形':'表格']]:[])] as [RibbonTab,string][]).map(([tab,label])=><button key={tab} role="tab" aria-selected={ribbonTab===tab} className={ribbonTab===tab?'on':''} onMouseDown={ev=>ev.preventDefault()} onClick={()=>tab==='review'?void openReview('changes'):setRibbonTab(tab)}>{label}</button>)}</nav>}
       <div className="writer-header-actions">
         <div className="export-wrap save-split"><button className="quiet-button" disabled={busy||switching} onClick={()=>void switchProject('open')}><FolderOpen size={15}/>打开</button><button className="quiet-button save-options" aria-label="更多打开选项" aria-expanded={openMenu} disabled={busy||switching} onClick={()=>{setSaveMenu(false);setExports(false);setOpenMenu(!openMenu);}}><ChevronDown size={12}/></button>{openMenu&&<div className="dropdown recent-dropdown"><button onClick={()=>{setOpenMenu(false);void switchProject('open','file');}}>打开 .tex 文件<span className="menu-shortcut">Ctrl+O</span></button><button onClick={()=>{setOpenMenu(false);void switchProject('open','folder');}}>打开工程文件夹</button><div className="recent-heading">最近打开</div>{recent.map(item=><button className="recent-entry" key={item.id} title={item.root+'/'+item.main} onClick={()=>{setOpenMenu(false);void switchProject('openRecent','file',item.id);}}><span>{documentFileName(item.main)}</span><span className="recent-parent">{item.root}</span></button>)}{!recent.length&&<p className="recent-empty">暂无记录</p>}{!!recent.length&&<button className="recent-clear" onClick={()=>void run(async()=>{await api.clearRecent();setRecent([]);})}>清空最近记录</button>}</div>}</div><button className="quiet-button" disabled={busy||switching} onClick={()=>void switchProject('newDocument')}><FilePlus2 size={15}/>新建</button>
         <div className="export-wrap save-split"><button className="quiet-button" disabled={switching} onClick={()=>void save()}><Save size={15}/>保存</button><button className="quiet-button save-options" aria-label="更多保存选项" aria-expanded={saveMenu} onClick={()=>{setExports(false);setSaveMenu(!saveMenu);}}><ChevronDown size={12}/></button>{saveMenu&&<div className="dropdown"><button onClick={()=>{setSaveMenu(false);void saveAs();}}>另存为<span className="menu-shortcut">Ctrl+Shift+S</span></button></div>}</div>
@@ -265,7 +273,7 @@ export default function WritingApp(){
       <div className="tool-group"><label>文件<select aria-label="源文件" value={sourceFile} onChange={event=>setSourceFile(event.target.value)}>{project?.files.filter(f=>f.path!==REVIEW_FILE&&f.path!=='pageweave-pages.tex').map(f=><option key={f.path} value={f.path}>{f.path}{f.dirty?' *':''}</option>)}</select></label></div>
       <div className="tool-group"><label>主文件<select aria-label="主文件" value={project?.main} onChange={event=>{const file=event.target.value;void run(()=>session.current!.mutate(p=>api.configure(file,p.engine)));}}>{project?.files.filter(f=>/\.tex$/i.test(f.path)&&f.path!=='pageweave-pages.tex').map(f=><option key={f.path}>{f.path}</option>)}</select></label><select aria-label="编译器" value={project?.engine} onChange={event=>{const engine=event.target.value as Engine;void run(()=>session.current!.mutate(p=>api.configure(p.main,engine)));}}><option value="xelatex">XeLaTeX</option><option value="pdflatex">pdfLaTeX</option><option value="lualatex">LuaLaTeX</option></select></div>
       <button disabled={busy} onClick={()=>void compileSource()}><RefreshCw size={16}/><span>重新排版</span></button><button onClick={()=>void run(()=>api.reveal())}><FolderOpen size={16}/><span>工程文件夹</span></button><button disabled={busy} onClick={()=>void switchProject('reload')}>重新读取</button><div className="ribbon-search"><button aria-label="查找与替换" title="查找 · Ctrl+F / 替换 · Ctrl+H" disabled={!sourceSearch} onClick={()=>openSearch('find')}><Search size={17}/><span>查找</span></button></div>
-    </div>:<WritingToolbar editor={e} enabled={enabled} painterArmed={formatArmed} onPainter={startPainter} painterEnabled={enabled&&view==='write'} tab={ribbonTab} reviewTools={<ReviewTools editor={e} enabled={enabled&&view==='write'} onComment={newComment} onPanel={mode=>void openReview(mode)} onError={error=>notify(error,true)}/>}  format={format} history={history} onMath={equation} onImage={()=>imageInput.current?.click()} onTable={()=>setTableDialog(true)} onLayout={openLayout} onFormulas={()=>setFormulasVisible(true)} onOutline={()=>setNavVisible(!navVisible)} onSearch={()=>{if(view==='pdf')void changeView('write');openSearch('find');}}/>}
+    </div>:<WritingToolbar editor={e} enabled={enabled} bodyWidth={paperLayout(project).width-2*paperLayout(project).margin} onSyncSelection={()=>{if(e)syncSelection(e);}} onParagraph={()=>{if(e)syncSelection(e);setParagraphDialog(true);}} onFurniture={()=>setFurnitureDialog(true)} onTableProperties={()=>setTableProperties(true)} onDrawing={insertDrawing} onEditDrawing={editDrawing} painterArmed={formatArmed} onPainter={startPainter} painterEnabled={enabled&&view==='write'} tab={ribbonTab} reviewTools={<ReviewTools editor={e} enabled={enabled&&view==='write'} onComment={newComment} onPanel={mode=>void openReview(mode)} onError={error=>notify(error,true)}/>}  format={format} history={history} onMath={equation} onImage={()=>imageInput.current?.click()} onTable={()=>setTableDialog(true)} onLayout={openLayout} onFormulas={()=>setFormulasVisible(true)} onOutline={()=>setNavVisible(!navVisible)} onSearch={()=>{if(view==='pdf')void changeView('write');openSearch('find');}}/>}
     {view==='source'&&sourceReviewLocked&&sourceFile===project?.main&&<div className="source-review-notice"><span>关闭修订并处理待审修改后，可编辑正文源码。</span><button onClick={()=>void openReview('changes')}>返回审阅</button></div>}
     <SearchPanel request={view==='pdf'?null:searchRequest} target={searchTarget} scope={view==='source'?sourceFile:'正文'} onMode={mode=>setSearchRequest(request=>request?{...request,mode}:null)} onClose={()=>setSearchRequest(null)}/>
     <input ref={imageInput} type="file" accept="image/png,image/jpeg,image/webp" aria-label="图片文件" hidden onChange={ev=>{const file=ev.target.files?.[0];ev.target.value='';if(file)void importImage(file);}}/>
@@ -273,7 +281,7 @@ export default function WritingApp(){
       <main className="writer-main">
         {view==='source'&&<section className="source-workspace">{activeSource?.content!==null&&activeSource?.content!==undefined?<SourceEditor key={project?.id} file={sourceFile} text={session.current?.sourceText(sourceFile)??''} readOnly={!activeSource.editable||switching||(sourceReviewLocked&&sourceFile===project?.main)} onChange={text=>{session.current?.changeSource(sourceFile,text);tick();}} location={sourceLocation?.file===sourceFile?sourceLocation:undefined} onCursor={setSourceLine} onUndo={()=>void sourceHistory('undo')} onRedo={()=>void sourceHistory('redo')} onSave={()=>void save()} onCompile={()=>void compileSource()} onSearchReady={setSourceSearch} onSearchBoundary={async()=>{await session.current?.flush();}}/>:<div className="source-resource"><FileText size={34}/><span>{sourceFile}</span><button className="outline-button" onClick={()=>void run(()=>api.reveal())}>打开工程文件夹</button></div>}</section>}
 
-        {supported&&seed&&project&&<div className="writer-view" hidden={view!=='write'}><FlowEditor key={project.id+':'+bodyEpoch} content={seed} layout={paperLayout(project)} zoom={zoom} readOnly={switching||!!project.reviewError} onReady={value=>{editor.current=value;tick();}} onChange={doc=>{if(currentView.current!=='source')session.current?.change(doc);tick();}} onSelection={tick} onComment={id=>{setReviewMode('comments');setReviewOpen(true);setCommentFocus({id,nonce:Date.now()});}} onPages={setPages} onPlan={plan=>{if(currentView.current!=='source')session.current?.changePlan(plan);}} onMath={setMath} onSearchReady={setWritingSearch}/></div>}
+        {supported&&seed&&project&&<div className="writer-view" hidden={view!=='write'}><FlowEditor key={project.id+':'+bodyEpoch} content={seed} layout={paperLayout(project)} zoom={zoom} readOnly={switching||!!project.reviewError} onReady={value=>{editor.current=value;tick();}} onChange={doc=>{if(currentView.current!=='source')session.current?.change(doc);tick();}} onSelection={tick} onComment={id=>{setReviewMode('comments');setReviewOpen(true);setCommentFocus({id,nonce:Date.now()});}} onPages={setPages} onPlan={plan=>{if(currentView.current!=='source')session.current?.changePlan(plan);}} onMath={setMath} onDrawing={setDrawingRequest} onSearchReady={setWritingSearch}/></div>}
         {view==='pdf'&&<div className="writer-view">{project&&!supported&&<div className="flow-unavailable"><span>当前工程的正文需要在源码视图中编辑。</span><button className="outline-button" onClick={()=>void changeView('source')}>查看源码</button></div>}<WritingPdf result={preview} blocks={supported?project?.writing??[]:[]} active={null} selected={null} zoom={zoom} onSelect={()=>{}} onEdit={begin} onReady={()=>{}} onChange={()=>{}} onFinish={()=>{}} onMath={setMath} onError={msg=>notify(msg,true)} onPages={setPdfPages}/></div>}
         {log&&<div className="writer-log"><div><strong>排版日志</strong><button aria-label="关闭排版日志" onClick={()=>setLog(false)}><X size={16}/></button></div><pre>{last?.log??'尚无日志'}</pre></div>}
       </main>
@@ -281,6 +289,10 @@ export default function WritingApp(){
       {reviewOpen&&view==='write'&&<ReviewPanel key={project?.id} editor={e} mode={reviewMode} onMode={setReviewMode} anchor={commentAnchor} focus={commentFocus} onCancelDraft={()=>setCommentAnchor(null)} onClose={()=>{setReviewOpen(false);setCommentAnchor(null);}} error={project?.reviewError} onError={error=>notify(error,true)}/>}
     </div>
     <footer className="writer-status"><span>{last?.ok===false?'排版失败':busy?'正在排版…':pending?'正在同步…':preview?.version===project?.version?'排版已更新':'等待排版'}</span><span aria-label="保存状态" role="status">{saveStatus==='saving'?'正在保存…':saveStatus==='pending'?'待保存':saveStatus==='error'?'保存失败':'已保存'}</span><button aria-label={view==='source'?'转到源码行':'转到页面'} title="跳转 · Ctrl+G" disabled={!destinationMax} onClick={()=>setGoTo(true)}>{view==='source'?`第 ${sourceLine} 行`:`${view==='pdf'?pdfPages:pages} 页`}</button><button className="word-count" aria-label="字数统计" disabled={!count} title="中文按字，英文和数字按词；不含公式、图片及 LaTeX 命令" onClick={()=>setWordDialog(true)}>{count?selectionCount?`已选 ${selectionCount} / 共 ${count.words} 字`:`${count.words} 字`:'字数 —'}</button><button onClick={()=>setLog(!log)}>日志</button><button title="命令面板 · Ctrl+Shift+P" onClick={()=>setPalette(true)}>命令</button>{formatArmed&&<button className="painter-status" onClick={()=>setFormatArmed(false)}>格式刷：选择文字 · Esc 取消</button>}<span className="writer-status-spacer"/>{view==='source'?<span>{activeSource?.encoding??''}</span>:<><button aria-label="缩小页面" onClick={()=>setZoom(v=>Math.max(.5,v-.1))}><Minus size={14}/></button><span>{Math.round(zoom*100)}%</span><button aria-label="放大页面" onClick={()=>setZoom(v=>Math.min(1.6,v+.1))}><Plus size={14}/></button></>}</footer>
+    {paragraphDialog&&e&&<ParagraphDialog editor={e} onClose={()=>setParagraphDialog(false)}/>}
+    {tableProperties&&e&&tableContext(e)&&<TableProperties editor={e} bodyWidth={paperLayout(project).width-2*paperLayout(project).margin} onClose={()=>setTableProperties(false)}/>}
+    {furnitureDialog&&<FurnitureDialog initial={readFurniture(project.files.find(file=>file.path===project.main)?.content??'')??defaultFurniture()} onClose={()=>setFurnitureDialog(false)} onApply={async value=>{capture();await session.current?.mutate(p=>api.pageFurniture(value,p.version));}}/>}
+    {drawingRequest&&<DrawingDialog request={drawingRequest} onClose={()=>setDrawingRequest(null)}/>}
     {palette&&<CommandPalette commands={commands} onClose={()=>setPalette(false)}/>}
     {goTo&&<GoToDialog kind={view==='source'?'line':'page'} max={destinationMax} onGo={jumpTo} onClose={()=>setGoTo(false)}/>}
     {wordDialog&&count&&<div className="modal-backdrop"><div className="modal word-count-dialog"><div className="modal-title"><h2>字数统计</h2><button aria-label="关闭字数统计" onClick={()=>setWordDialog(false)}><X size={18}/></button></div><dl><div><dt>字数</dt><dd>{count.words}</dd></div><div><dt>字符数（不含空格）</dt><dd>{count.characters}</dd></div><div><dt>字符数（含空格）</dt><dd>{count.charactersWithSpaces}</dd></div>{selectionCount>0&&<div><dt>已选字数</dt><dd>{selectionCount}</dd></div>}</dl><p>中文按字，英文和数字按词；不计公式、图片及 LaTeX 命令。</p></div></div>}

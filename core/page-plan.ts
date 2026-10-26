@@ -2,6 +2,8 @@ import {createHash} from 'node:crypto';
 import {nodeSize} from './review';
 import {serializeRich,serializeInline,type RichNode,type WritingBlock} from './writing';
 import type {PaperLayout} from './flow';
+import {designedTable,serializeDesignedTable} from './table-design';
+import {designedParagraph,serializeDesignedParagraph} from './paragraph-design';
 
 export const PAGE_PLAN_FILE='pageweave-pages.tex';
 export interface PagePlan {source:string;breaks:number[];layout:PaperLayout}
@@ -28,7 +30,7 @@ export function pagedBlocks(doc:RichNode,blocks:WritingBlock[],breaks:number[]){
         return bounds.slice(1).map((to,i)=>{
           if(i)used.add(bounds[i]);
           const body=inlineSlice(n.content??[],bounds[i]-from,to-from),last=i===bounds.length-2?1:0;
-          const fragment=n.type==='heading'?`\\PageWeaveHeadingPart{${n.attrs?.level??1}}{${n.attrs?.textAlign??'left'}}{${last}}{${body}}`:`\\PageWeaveParaPart{${n.attrs?.textAlign??'justify'}}{${n.attrs?.lineHeight??1.5}}{${last}}{${body}}`;
+          const fragment=designedParagraph(n)?serializeDesignedParagraph(n,body,i===0,!!last):n.type==='heading'?`\\PageWeaveHeadingPart{${n.attrs?.level??1}}{${n.attrs?.textAlign??'left'}}{${last}}{${body}}`:`\\PageWeaveParaPart{${n.attrs?.textAlign??'justify'}}{${n.attrs?.lineHeight??1.5}}{${last}}{${body}}`;
           return (i?'\\PageWeaveBreak\n':'')+fragment;
         }).join('\n');
       }
@@ -38,6 +40,7 @@ export function pagedBlocks(doc:RichNode,blocks:WritingBlock[],breaks:number[]){
       return prefix+`\\PageWeaveList{${n.type==='orderedList'?'ordered':'bullet'}}{${n.attrs?.start??1}}{\n${items.join('\n')}\n}`;
     }
     if(n.type==='table'){
+      if(designedTable(n)){let rowPos=pos+1;return prefix+serializeDesignedTable(n,serializeRich,index=>{const before=br(rowPos,index>0);rowPos+=nodeSize(n.content![index]);return before;});}
       let rowPos=pos+1;const rows=(n.content??[]).map((row,i)=>{const before=br(rowPos,i>0);const content=serializeRich({type:'doc',content:[{type:'table',content:[row]}]});const rowSource=content.slice(content.indexOf('\\MogaoRow'),content.lastIndexOf('\n}'));rowPos+=nodeSize(row);return before+rowSource;});
       return prefix+`\\MogaoTable{${n.content?.[0]?.content?.length??1}}{\n${rows.join('\n')}\n}`;
     }

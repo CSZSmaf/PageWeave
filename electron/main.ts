@@ -142,6 +142,7 @@ app.whenReady().then(async () => {
   handler('writing:insert',(id,kind,version)=>project.insertBlock(id,kind,version));
   handler('writing:delete',(id,version)=>project.deleteBlock(id,version));
   handler('writing:page',(margin,paper,landscape,version)=>project.pageSettings(margin,paper,landscape,version));
+  handler('writing:furniture',(value,version)=>project.pageFurniture(value,version));
   handler('project:source', (file: string, text: string, version: number) => project.sourceWithDependencies(file,text,version));
   handler('project:width', (id: string, value: number, unit: string, version: number) => project.width(id, value, unit, version));
   handler('project:undo', (version: number) => project.undo(version));

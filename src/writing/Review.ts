@@ -48,9 +48,10 @@ export function reviewPlugin(){return new Plugin<{visible:boolean;active?:string
   props:{decorations:state=>reviewKey.getState(state)?.decorations},
   appendTransaction(transactions,oldState,newState){
     if(!newState.doc.attrs.review||transactions.some(tr=>tr.getMeta(reviewKey)||isHistoryTransaction(tr))||oldState.doc.content.eq(newState.doc.content))return null;
-    const tr=assignIds(newState.tr),mapping=new Mapping();for(const tx of transactions)mapping.appendMapping(tx.mapping);
+    const tr=assignIds(newState.tr);
     const before=reviewSnapshot(oldState.doc).doc,data=newState.doc.attrs.review as ReviewData;
-    const next={...data,baseline:advanceBaseline(before,tr.doc.content.toJSON()),comments:mapComments(data.comments,mapping)};
+    let comments=data.comments;for(const tx of transactions){const moves=tx.getMeta('contentMoves') as {from:number;to:number;offset:number}[]|undefined,previous=comments;comments=mapComments(comments,tx.mapping);if(moves)comments=comments.map((mapped,index)=>{const old=previous[index];if(old.orphaned)return mapped;const move=moves.find(move=>old.from>=move.from&&old.to<=move.to);if(move)return {...old,from:old.from+move.offset,to:old.to+move.offset};return moves.some(move=>old.from<move.to&&old.to>move.from)?{...mapped,orphaned:true}:mapped;});}
+    const next={...data,baseline:advanceBaseline(before,tr.doc.content.toJSON()),comments};
     return tr.setDocAttribute('review',next).setMeta(reviewKey,true);
   },
 });}
@@ -58,7 +59,7 @@ export const Review=Extension.create({
   name:'pageReview',
   addGlobalAttributes(){return [
     {types:['doc'],attributes:{review:{default:null,rendered:false}}},
-    {types:['paragraph','heading','displayMath','pageBreak','flowImage','table','bulletList','orderedList'],attributes:{reviewId:{default:null,rendered:false,keepOnSplit:false}}},
+    {types:['paragraph','heading','displayMath','pageBreak','flowImage','drawing','table','bulletList','orderedList'],attributes:{reviewId:{default:null,rendered:false,keepOnSplit:false}}},
   ];},
   addProseMirrorPlugins(){return [reviewPlugin()];},
 });

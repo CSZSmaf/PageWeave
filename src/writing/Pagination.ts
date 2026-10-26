@@ -84,7 +84,10 @@ function paginate(view:EditorView,layout:PaperLayout){
       else{const rect=element.getBoundingClientRect();units.push({pos,top:rect.top-origin,bottom:rect.bottom-origin});}
     }
   }finally{mirror.remove();}
-  const body=layout.height-2*layout.margin,stride=layout.height+PAGE_GAP;
+  // Leave 3 pt for fractional glyph/border metrics between Chromium and TeX.
+  // A row barely touching the bottom must not cause an extra TeX page before
+  // the next explicit shared break.
+  const body=layout.height-2*layout.margin-4,stride=layout.height+PAGE_GAP;
   let added=0,page=0;const decorations:Decoration[]=[],breaks:number[]=[];
   for(const unit of units){
     const top=unit.top+added,bottom=unit.bottom+added,pageStart=page*stride;

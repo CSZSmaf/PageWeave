@@ -1,8 +1,9 @@
 import type {ProjectState} from './types';
 import type {RichNode,WritingBlock} from './writing';
+import {readFurniture,type PageFurniture} from './page-furniture';
 
 export interface FlowPart {id:string;content:RichNode}
-export interface PaperLayout {width:number;height:number;margin:number;fontSize?:number;fontFamily?:string;cjkFont?:string}
+export interface PaperLayout {width:number;height:number;margin:number;fontSize?:number;fontFamily?:string;cjkFont?:string;furniture?:PageFurniture|null}
 const whitespace=(text:string)=>text.replace(/%[^\r\n]*/g,'').trim()==='';
 
 // Only join a document whose entire body is represented by editable writing blocks.
@@ -43,5 +44,5 @@ export function paperLayout(project:ProjectState):PaperLayout{
   const px=96/25.4,margin=Number(/margin\s*=\s*([\d.]+)mm/.exec(options)?.[1]??25);
   const fontSize=Number(/\\documentclass\[([^\]]*)\]/.exec(text)?.[1].match(/\b(10|11|12)pt\b/)?.[1]??12);
   const fontFamily=/\\setmainfont(?:\[[^\]]*\])?\{([^}]+)\}/.exec(text)?.[1]??'Times New Roman',cjkFont=/\\setCJKmainfont(?:\[[^\]]*\])?\{([^}]+)\}/.exec(text)?.[1]??'SimSun';
-  return {width:width*px,height:height*px,margin:margin*px,fontSize,fontFamily,cjkFont};
+  return {width:width*px,height:height*px,margin:margin*px,fontSize,fontFamily,cjkFont,furniture:readFurniture(text)};
 }

@@ -14,6 +14,8 @@ import {PAGE_PLAN_FILE,pagePlanSource,type PagePlan} from './page-plan';
 import {documentFiles} from './document-files';
 import {texFileName} from './file-name';
 import {constants as fsConstants} from 'node:fs';
+import {DESIGN_STYLE,DESIGN_STYLE_FILE} from './design-style';
+import {writeFurniture,validateFurniture,type PageFurniture} from './page-furniture';
 
 const sourceExtensions = new Set(['.tex', '.bib', '.sty', '.cls', '.txt', '.md', '.bst', '.cfg']);
 const excludedDirectories = new Set(['node_modules', '.git', '.tex-workbench', 'dist', 'dist-electron', 'release','recovery']);
@@ -199,7 +201,11 @@ export class Project {
     let text=source;
     // At an equal offset, replace/remove the old macro before inserting its predecessor.
     for(const edit of edits.sort((a,b)=>b.from-a.from||b.to-a.to))text=text.slice(0,edit.from)+edit.after+text.slice(edit.to);
-    let addTools=false,addLists=false;
+    let addTools=false,addLists=false,addDesign=false;
+    if(/\\PageWeave(?:Table|Paragraph|Heading|Drawing)\b/.test(text)){
+      const existing=this.files.get(DESIGN_STYLE_FILE);if(existing&&this.history.texts.get(DESIGN_STYLE_FILE)!==DESIGN_STYLE)throw new Error('工程已有不同的 pageweave-design.sty，请先在源码视图中检查。');
+      addDesign=!existing;if(!text.includes('\\usepackage{pageweave-design}'))text=text.replace('\\begin{document}','\\usepackage{pageweave-design}\n\\begin{document}');
+    }
     if(parts.some(part=>/"type":"(?:bulletList|orderedList)"/.test(JSON.stringify(part.content)))){
       const existing=this.files.get(LIST_STYLE_FILE);
       if(existing&&this.history.texts.get(LIST_STYLE_FILE)!==LIST_STYLE)throw new Error('工程已有不同的列表样式文件，请先在源码视图中检查。');
@@ -221,6 +227,7 @@ export class Project {
     }else if(stored&&text!==source)throw new Error('请在写作视图中同步审阅信息后修改正文。');
     if(addTools)this.addFile('mogao-tools.sty',Buffer.from(WRITING_TOOLS_STYLE),'UTF-8',WRITING_TOOLS_STYLE);
     if(addLists)this.addFile(LIST_STYLE_FILE,Buffer.from(LIST_STYLE),'UTF-8',LIST_STYLE);
+    if(addDesign)this.addFile(DESIGN_STYLE_FILE,Buffer.from(DESIGN_STYLE),'UTF-8',DESIGN_STYLE);
     if(reviewPatch)this.ensureReviewFile();
     if(this.history.commit('连续写作',[minimalPatch(this.main,source,text),...(reviewPatch?[reviewPatch]:[])]))this.version++;
     return this.state();
@@ -247,6 +254,14 @@ export class Project {
     this.assertVersion(version);if(!Number.isFinite(margin)||margin<10||margin>50||!['a4paper','letterpaper','a5paper'].includes(paper))throw new Error('页面参数无效。');
     const source=this.history.texts.get(this.main)!;const match=/\\usepackage\[[^\]]*\]\{geometry\}/.exec(source);if(!match)throw new Error('当前工程的页面设置需要从源码修改。');
     this.history.commit('页面设置',[{file:this.main,from:match.index,to:match.index+match[0].length,before:match[0],after:`\\usepackage[${paper},margin=${margin}mm${landscape?',landscape':''}]{geometry}`}]);this.version++;return this.state();
+  }
+  pageFurniture(value:PageFurniture,version:number){
+    this.assertVersion(version);if(!canFlow(this.state()))throw new Error('此工程的页眉页脚需要从源码设置。');
+    const config=validateFurniture(value),source=this.history.texts.get(this.main)!;
+    const existing=this.files.get(DESIGN_STYLE_FILE);if(existing&&this.history.texts.get(DESIGN_STYLE_FILE)!==DESIGN_STYLE)throw new Error('工程已有不同的页面设计样式，请先在源码视图中检查。');
+    let text=source;if(!text.includes('\\usepackage{pageweave-design}'))text=text.replace('\\begin{document}','\\usepackage{pageweave-design}\n\\begin{document}');
+    text=writeFurniture(text,config);if(!existing)this.addFile(DESIGN_STYLE_FILE,Buffer.from(DESIGN_STYLE),'UTF-8',DESIGN_STYLE);
+    if(this.history.commit('页眉页脚',[minimalPatch(this.main,source,text)]))this.version++;return this.state();
   }
   source(file: string, text: string, version: number) {
     this.assertVersion(version);

@@ -26,6 +26,7 @@ const api: WorkbenchApi = {
   insertBlock:(id,kind,version)=>ipcRenderer.invoke('writing:insert',id,kind,version),
   deleteBlock:(id,version)=>ipcRenderer.invoke('writing:delete',id,version),
   pageSettings:(margin,paper,landscape,version)=>ipcRenderer.invoke('writing:page',margin,paper,landscape,version),
+  pageFurniture:(value,version)=>ipcRenderer.invoke('writing:furniture',value,version),
   source: (file, text, version) => ipcRenderer.invoke('project:source', file, text, version),
   width: (id, value, unit, version) => ipcRenderer.invoke('project:width', id, value, unit, version),
   undo: version => ipcRenderer.invoke('project:undo', version),

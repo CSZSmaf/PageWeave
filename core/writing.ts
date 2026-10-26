@@ -1,4 +1,8 @@
 import type { Range } from './types';
+import {designedTable,serializeDesignedTable,parseTableOptions,tableColumnSpec,cellFill} from './table-design';
+import {designedParagraph,serializeDesignedParagraph} from './paragraph-design';
+import {serializeDrawing,validateDiagram,diagramTikz} from './drawing';
+import {decodeMetadata} from './page-furniture';
 export interface RichNode { type: string; text?: string; attrs?: Record<string, any>; marks?: {type:string;attrs?:Record<string,any>}[]; content?: RichNode[] }
 export interface WritingBlock { id:string; file:string; line:number; range:Range; bodyRange:Range; content:RichNode; editable:boolean; error?:string }
 export interface WritingRegion { id:string; page:number; x:number; y:number; width:number; height:number }
@@ -44,7 +48,9 @@ export function serializeRich(doc:RichNode,listDepth=0):string{
       return `\\PageWeaveList{${node.type==='orderedList'?'ordered':'bullet'}}{${Math.floor(num(node.attrs?.start,1,1,999999))}}{\n${items}\n}`;
     }
     if(node.type==='flowImage')return `\\MogaoImage{${imagePath(node.attrs?.src)}}{${num(node.attrs?.width,75,10,100)/100}}{${['left','center','right'].includes(node.attrs?.textAlign)?node.attrs!.textAlign:'center'}}{${num(node.attrs?.naturalWidth,800,1,16000)}}{${num(node.attrs?.naturalHeight,600,1,16000)}}`;
+    if(node.type==='drawing')return serializeDrawing(node);
     if(node.type==='table'){
+      if(designedTable(node))return serializeDesignedTable(node,serializeRich);
       const rows=node.content??[],cols=rows[0]?.content?.length??0;
       if(!cols||cols>12||!rows.length||rows.length>1000)throw new Error('表格支持 1–12 列，最多 1000 行。');
       const body=rows.map(row=>{
@@ -57,9 +63,10 @@ export function serializeRich(doc:RichNode,listDepth=0):string{
       return `\\MogaoTable{${cols}}{\n${body}\n}`;
     }
     const body=(node.content??[]).map(serializeInline).join('')||'\\strut';
+    if(['paragraph','heading'].includes(node.type)&&designedParagraph(node))return serializeDesignedParagraph(node,body);
     if(node.type==='paragraph'){
       const align=['left','center','right','justify'].includes(node.attrs?.textAlign)?node.attrs!.textAlign:'justify';
-      return `\\MogaoPara{${align}}{${num(node.attrs?.lineHeight,1.5,1,3)}}{${body}}`;
+      return `\\MogaoPara{${align}}{${num(node.attrs?.lineHeight,1.5,.5,6)}}{${body}}`;
     }
     if(node.type==='heading')return `\\MogaoHeading{${num(node.attrs?.level,1,1,3)}}{${['left','center','right','justify'].includes(node.attrs?.textAlign)?node.attrs!.textAlign:'left'}}{${body}}`;
     if(node.type==='displayMath')return `\\MogaoEquation{${node.attrs?.latex??''}}`;
@@ -91,11 +98,35 @@ export function parseRich(source:string,listDepth=0):RichNode{
   const content:RichNode[]=[];let i=0;
   while(i<source.length){
     if(/\s/.test(source[i])){i++;continue;}if(source[i]==='%'){const e=source.indexOf('\n',i);i=e<0?source.length:e+1;continue;}
-    const m=/^\\(MogaoPara|MogaoHeading|MogaoEquation|MogaoImage|MogaoTable|PageWeaveList|newpage)\b/.exec(source.slice(i));if(!m)throw new Error('写作区包含未适配的 LaTeX 结构');i+=m[0].length;
+    const m=/^\\(MogaoPara|MogaoHeading|MogaoEquation|MogaoImage|MogaoTable|PageWeaveList|PageWeaveTable|PageWeaveParagraph|PageWeaveHeading|PageWeaveDrawing|newpage)\b/.exec(source.slice(i));if(!m)throw new Error('写作区包含未适配的 LaTeX 结构');i+=m[0].length;
     if(m[1]==='newpage'){content.push({type:'pageBreak'});continue;}
-    const args=[];const count=m[1]==='MogaoImage'?5:m[1]==='MogaoTable'?2:['MogaoPara','MogaoHeading','PageWeaveList'].includes(m[1])?3:1;
+    const args=[];const count=m[1]==='PageWeaveParagraph'?6:m[1]==='PageWeaveHeading'?7:m[1]==='PageWeaveDrawing'?4:m[1]==='MogaoImage'?5:m[1]==='MogaoTable'?2:['MogaoPara','MogaoHeading','PageWeaveList','PageWeaveTable'].includes(m[1])?3:1;
     for(let n=0;n<count;n++){const g=readGroup(source,i);if(!g)throw new Error('写作结构参数未闭合');args.push(g.text);i=g.to;}
-    if(m[1]==='PageWeaveList'){
+    if(m[1]==='PageWeaveDrawing'){
+      const drawing=validateDiagram(decodeMetadata(args[0]));if(diagramTikz(drawing)!==args[3].trim())throw new Error('绘图源码已变化，请从源码视图编辑或恢复原绘图。');
+      if(!['left','center','right'].includes(args[2])||!Number.isFinite(Number(args[1]))||Number(args[1])<.15||Number(args[1])>1)throw new Error('绘图尺寸无效。');
+      content.push({type:'drawing',attrs:{drawing,width:Number(args[1])*100,textAlign:args[2]}});
+    }else if(m[1]==='PageWeaveParagraph'||m[1]==='PageWeaveHeading'){
+      const heading=m[1]==='PageWeaveHeading',offset=heading?1:0,[align,mode,line,before,after,body]=args.slice(offset);
+      if(!['left','center','right','justify'].includes(align)||!['exact','multiple'].includes(mode)||![line,before,after].every(value=>Number.isFinite(Number(value)))||Number(before)<0||Number(before)>120||Number(after)<0||Number(after)>120||Number(line)<(mode==='exact'?6:.5)||Number(line)>(mode==='exact'?120:6)||heading&&![1,2,3].includes(Number(args[0])))throw new Error('段落设置参数无效。');
+      content.push({type:heading?'heading':'paragraph',attrs:{...(heading?{level:Number(args[0])}:{}),textAlign:align,lineHeight:line+(mode==='exact'?'pt':''),spacingBefore:Number(before),spacingAfter:Number(after)},content:inline(body)});
+    }else if(m[1]==='PageWeaveTable'){
+      const {attrs,widths}=parseTableOptions(args[0]),table:RichNode={type:'table',attrs,content:[]},fills:{cell:RichNode;row:number;color:string}[]=[],rules:string[]=[];let at=0;
+      while(at<args[2].length){if(/\s/.test(args[2][at])){at++;continue;}if(!args[2].startsWith('\\PageWeaveRow',at))throw new Error('表格行结构无效。');at+='\\PageWeaveRow'.length;
+        const fields=[];for(let k=0;k<3;k++){const g=readGroup(args[2],at);if(!g)throw new Error('表格行未闭合。');fields.push(g.text);at=g.to;}
+        if(!Number.isFinite(Number(fields[0]))||Number(fields[0])<0||Number(fields[0])>300||!['0','1'].includes(fields[1]))throw new Error('表格行高无效。');
+        rules.push(fields[1]);const row:RichNode={type:'tableRow',attrs:{minHeight:Number(fields[0])},content:[]};let ci=0;
+        while(ci<fields[2].length){if(/[\s&]/.test(fields[2][ci])){ci++;continue;}if(!fields[2].startsWith('\\PageWeaveCell',ci))throw new Error('单元格结构无效。');ci+='\\PageWeaveCell'.length;
+          const values=[];for(let k=0;k<4;k++){const g=readGroup(fields[2],ci);if(!g)throw new Error('单元格未闭合。');values.push(g.text);ci=g.to;}
+          if(!['0','1'].includes(values[0])||values[1]&&!/^[a-f\d]{6}$/i.test(values[1])||!/^[a-f\d]{6}$/i.test(values[2]))throw new Error('单元格颜色无效。');
+          const cell:RichNode={type:values[0]==='1'?'tableHeader':'tableCell',attrs:{colspan:1,rowspan:1,colwidth:[widths[row.content!.length]],backgroundColor:values[1]?'#'+values[1]:null},content:parseRich(values[3]).content};if(cell.content?.some(child=>child.type!=='paragraph'))throw new Error('单元格包含未适配结构。');row.content!.push(cell);fills.push({cell,row:table.content!.length,color:'#'+values[2]});
+        }
+        if(row.content!.length!==widths.length)throw new Error('表格列数不匹配。');table.content!.push(row);
+      }
+      if(!table.content!.length||table.content!.length>1000||tableColumnSpec(table)!==args[1]||fills.some(item=>cellFill(table,item.row,item.cell)!==item.color))throw new Error('表格样式与源码不一致。');
+      if(table.content!.some((row,index)=>rules[index]!==String(attrs.tableStyle==='none'?0:attrs.tableStyle==='academic'?(index===table.content!.length-1||index===0&&row.content!.some(cell=>cell.type==='tableHeader')?1:0):1)))throw new Error('表格边框源码已变化，请从源码视图编辑。');
+      content.push(table);
+    }else if(m[1]==='PageWeaveList'){
       if(listDepth>=4||!['bullet','ordered'].includes(args[0])||!/^\d+$/.test(args[1])||Number(args[1])<1||Number(args[1])>999999)throw new Error('列表参数无效。');
       const items:RichNode[]=[];let at=0;
       while(at<args[2].length){

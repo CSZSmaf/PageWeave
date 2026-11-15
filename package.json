@@ -1,7 +1,7 @@
 {
   "name": "pageweave",
   "productName": "PageWeave",
-  "version": "0.13.0",
+  "version": "0.14.0",
   "private": true,
   "license": "Apache-2.0",
   "description": "Continuous page writing, editable formulas and LaTeX PDF output",
@@ -23,18 +23,19 @@
     "@codemirror/search": "^6.5.0",
     "@codemirror/state": "^6.5.2",
     "@codemirror/view": "^6.38.0",
+    "@tiptap/extension-list": "^3.32.0",
     "@tiptap/extension-table": "^3.32.0",
     "@tiptap/extension-text-align": "^3.32.0",
     "@tiptap/extension-text-style": "^3.32.0",
     "@tiptap/react": "^3.32.0",
     "@tiptap/starter-kit": "^3.32.0",
+    "fflate": "^0.8.3",
     "katex": "^0.19.1",
     "lucide-react": "^0.468.0",
     "mathlive": "^0.111.1",
     "pdfjs-dist": "6.4.299",
     "react": "^19.2.0",
-    "react-dom": "^19.2.0",
-    "@tiptap/extension-list": "^3.32.0"
+    "react-dom": "^19.2.0"
   },
   "devDependencies": {
     "@types/katex": "^0.16.8",
@@ -52,7 +53,7 @@
   "build": {
     "appId": "local.mogao.texworkbench",
     "productName": "PageWeave",
-    "copyright": "Copyright © 2026 CSZSmaf",
+    "copyright": "Copyright 漏 2026 CSZSmaf",
     "directories": {
       "output": "release"
     },
@@ -68,7 +69,8 @@
       "LICENSE",
       "THIRD_PARTY_NOTICES.txt",
       "third-party/**/*",
-      "docs/TEX.md"
+      "docs/TEX.md",
+      "docs/TEMPLATES.md"
     ],
     "win": {
       "target": "dir",
@@ -88,6 +90,10 @@
       {
         "from": "docs/TEX.md",
         "to": "docs/TEX.md"
+      },
+      {
+        "from": "docs/TEMPLATES.md",
+        "to": "docs/TEMPLATES.md"
       }
     ]
   },

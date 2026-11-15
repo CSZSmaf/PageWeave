@@ -3,6 +3,7 @@ import {randomUUID} from 'node:crypto';
 import {Project} from './project';
 import {Compiler} from './compiler';
 import {REVIEW_FILE} from './review';
+import {readSubmission} from './submission';
 
 /** Compile just the equation in an isolated snapshot. Never edit the document. */
 export class FormulaCompiler {
@@ -18,7 +19,7 @@ export class FormulaCompiler {
     copy.files.delete('pageweave-pages.tex');copy.history.texts.delete('pageweave-pages.tex');
     const source=copy.history.texts.get(state.main)!;const start=source.indexOf('\\begin{document}');
     if(start<0)throw new Error('未找到文档正文入口。');
-    const preamble=source.slice(0,start)
+    const preamble=readSubmission(source)?'\\documentclass[12pt,border=8pt]{standalone}\n\\usepackage{pageweave-submission}':source.slice(0,start)
       .replace(/\\documentclass(?:\s*\[[^\]]*\])?\s*\{[^}]+\}/,'\\documentclass[12pt,border=8pt]{standalone}')
       .replace(/\\usepackage(?:\s*\[[^\]]*\])?\s*\{geometry\}/g,'')
       .replace(/\\pagestyle\{[^}]*\}/g,'');

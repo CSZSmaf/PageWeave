@@ -51,6 +51,13 @@ export interface WorkbenchApi {
   demo(): Promise<ProjectState | null>;
   writingDemo(): Promise<ProjectState | null>;
   newDocument(): Promise<ProjectState | null>;
+  submissionPresets():Promise<import('./submission').SavedSubmission[]>;
+  saveSubmissionPreset(name:string,config:import('./submission').SubmissionConfig):Promise<import('./submission').SavedSubmission[]>;
+  removeSubmissionPreset(id:string):Promise<import('./submission').SavedSubmission[]>;
+  submissionWebsite(id:string):Promise<void>;
+  newSubmission(config:import('./submission').SubmissionConfig):Promise<ProjectState|null>;
+  applySubmission(config:import('./submission').SubmissionConfig,version:number):Promise<ProjectState>;
+  previewSubmission(config:import('./submission').SubmissionConfig,current:boolean):Promise<CompileResult>;
   writeBlock(id:string,content:RichNode,version:number):Promise<ProjectState>;
   writeFlow(parts:import('./flow').FlowPart[],version:number,document?:RichNode):Promise<ProjectState>;
   pagePlan(plan:import('./page-plan').PagePlan,version:number):Promise<ProjectState>;

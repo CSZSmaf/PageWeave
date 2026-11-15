@@ -25,6 +25,11 @@ function imagePath(value:unknown){const path=String(value??'');if(!/^[a-zA-Z0-9_
 export function serializeInline(node:RichNode):string{
   if(node.type==='hardBreak')return '\\MogaoLineBreak{}';
   if(node.type==='inlineMath')return `\\MogaoInlineMath{${node.attrs?.latex??''}}`;
+  if(node.type==='citation'){
+    const command=node.attrs?.command??'cite',keys=String(node.attrs?.keys??'').trim();
+    if(!['cite','citep','citet'].includes(command)||!keys.split(',').every(key=>/^[\w:./-]+$/.test(key.trim())))throw new Error('参考文献引用键无效。');
+    return `\\${command}{${keys}}`;
+  }
   if(node.type!=='text')throw new Error('不支持的正文结构：'+node.type);
   let result=escapeText(node.text??'');
   const order=['bold','italic','underline','strike','superscript','subscript'];
@@ -90,6 +95,7 @@ function inline(source:string,marks:RichNode['marks']=[]):RichNode[]{
     flush();
     if(name==='MogaoLineBreak'){const g=readGroup(source,i);if(g)i=g.to;nodes.push({type:'hardBreak'});continue;}
     if(name==='MogaoInlineMath'){const g=readGroup(source,i);if(!g)throw new Error('公式未闭合');i=g.to;nodes.push({type:'inlineMath',attrs:{latex:g.text}});continue;}
+    if(['cite','citep','citet'].includes(name)){const g=readGroup(source,i);if(!g)throw new Error('参考文献引用未闭合');i=g.to;const node={type:'citation',attrs:{command:name,keys:g.text}};serializeInline(node);nodes.push(node);continue;}
     const mark=({textbf:'bold',textit:'italic',uline:'underline',sout:'strike',textsuperscript:'superscript',textsubscript:'subscript'})[name as 'textbf'];
     if(mark){const g=readGroup(source,i);if(!g)throw new Error('格式命令未闭合');i=g.to;nodes.push(...inline(g.text,[...(marks??[]),{type:mark}]));continue;}
     if(name==='PageWeaveLink'||name==='href'){

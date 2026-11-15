@@ -9,7 +9,7 @@ export const reviewData=(doc:RichNode):ReviewData|null=>doc.attrs?.review??null;
 export const reviewId=(node:RichNode):string=>node.attrs?.reviewId??'';
 export const nodeSource=(node:RichNode)=>serializeRich({type:'doc',content:[node]});
 export const documentSource=(doc:RichNode)=>serializeRich(doc);
-export function nodeSize(node:RichNode):number{return node.type==='text'?(node.text?.length??0):['hardBreak','inlineMath','displayMath','flowImage','drawing','pageBreak'].includes(node.type)?1:2+(node.content??[]).reduce((n,c)=>n+nodeSize(c),0);}
+export function nodeSize(node:RichNode):number{return node.type==='text'?(node.text?.length??0):['hardBreak','inlineMath','citation','displayMath','flowImage','drawing','pageBreak'].includes(node.type)?1:2+(node.content??[]).reduce((n,c)=>n+nodeSize(c),0);}
 export const nodePosition=(nodes:RichNode[],index:number)=>nodes.slice(0,index).reduce((n,c)=>n+nodeSize(c),0);
 export function identify(nodes:RichNode[]):RichNode[]{
   const ids=new Set<string>();return nodes.map(node=>{let id=reviewId(node);if(!id||ids.has(id))id=crypto.randomUUID();ids.add(id);return {...node,attrs:{...node.attrs,reviewId:id}};});

@@ -1,9 +1,10 @@
 import type {ProjectState} from './types';
 import type {RichNode,WritingBlock} from './writing';
 import {readFurniture,type PageFurniture} from './page-furniture';
+import {readSubmission,submissionBodyRange} from './submission';
 
 export interface FlowPart {id:string;content:RichNode}
-export interface PaperLayout {width:number;height:number;margin:number;fontSize?:number;fontFamily?:string;cjkFont?:string;furniture?:PageFurniture|null}
+export interface PaperLayout {width:number;height:number;margin:number;fontSize?:number;fontFamily?:string;cjkFont?:string;furniture?:PageFurniture|null;submission?:boolean}
 const whitespace=(text:string)=>text.replace(/%[^\r\n]*/g,'').trim()==='';
 
 // Only join a document whose entire body is represented by editable writing blocks.
@@ -11,9 +12,9 @@ const whitespace=(text:string)=>text.replace(/%[^\r\n]*/g,'').trim()==='';
 export function canFlow(project:ProjectState){
   const blocks=project.writing;
   const source=project.files.find(f=>f.path===project.main)?.content??'';
-  const start=source.indexOf('\\begin{document}'),end=source.lastIndexOf('\\end{document}');
+  const managed=submissionBodyRange(source),start=managed?.from??source.indexOf('\\begin{document}'),end=managed?.to??source.lastIndexOf('\\end{document}');
   if(!blocks.length||start<0||end<start||blocks.some(b=>b.file!==project.main||!b.editable)||new Set(blocks.map(b=>b.id)).size!==blocks.length)return false;
-  let at=start+'\\begin{document}'.length;
+  let at=managed?start:start+'\\begin{document}'.length;
   for(const block of blocks){if(block.range.from<at||!whitespace(source.slice(at,block.range.from)))return false;at=block.range.to;}
   return whitespace(source.slice(at,end));
 }
@@ -37,6 +38,7 @@ export function flowParts(doc:RichNode,fallback:string):FlowPart[]{
 }
 export function paperLayout(project:ProjectState):PaperLayout{
   const text=project.files.find(f=>f.path===project.main)?.content??'';
+  if(readSubmission(text))return {width:210*96/25.4,height:297*96/25.4,margin:25*96/25.4,fontSize:12,fontFamily:'Times New Roman',cjkFont:'SimSun',submission:true};
   const options=/\\usepackage\[([^\]]*)\]\{geometry\}/.exec(text)?.[1]??'';
   const name=/\b(a4paper|a5paper|letterpaper)\b/.exec(options)?.[1]??/\\documentclass\[[^\]]*\b(a4paper|a5paper|letterpaper)\b/.exec(text)?.[1]??'a4paper';
   let [width,height]=name==='a5paper'?[148,210]:name==='letterpaper'?[215.9,279.4]:[210,297];

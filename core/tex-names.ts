@@ -9,4 +9,4 @@ const OLD_NAMES=Object.fromEntries(Object.entries(TEX_NAMES).map(([long,short])=
 function rename(source:string,names:Record<string,string>){return source.replace(/%[^\r\n]*|\\([A-Za-z]+)|\\[^A-Za-z]/g,(token,name)=>name&&names[name]?'\\'+names[name]:token);}
 export const shortTex=(source:string)=>rename(source,TEX_NAMES);
 export const legacyTex=(source:string)=>rename(source,OLD_NAMES);
-export const usesPageWeave=(source:string)=>/\\usepackage(?:\[[^\]]*\])?\{(?:pageweave|pw)\}/.test(source.replace(/(?<!\\)%[^\r\n]*/g,''));
+export const usesPageWeave=(source:string)=>/\\usepackage(?:\[[^\]]*\])?\{(?:pageweave|pw|pageweave-submission)\}/.test(source.replace(/(?<!\\)%[^\r\n]*/g,''));

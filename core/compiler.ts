@@ -95,4 +95,5 @@ export class Compiler {
     return { file, line };
   }
   pdfPath(token: string) { const build = this.builds.get(token); if (!build) throw new Error('请先成功编译。'); return build.pdf; }
+  async discard(result:CompileResult){this.builds.delete(result.token);await fs.rm(path.join(this.cacheRoot,result.token),{recursive:true,force:true});}
 }

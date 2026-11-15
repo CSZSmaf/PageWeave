@@ -20,6 +20,7 @@ import {INLINE_STYLE,INLINE_STYLE_FILE} from './inline-format';
 import {writeFurniture,validateFurniture,type PageFurniture} from './page-furniture';
 import {LEGACY_BASE_STYLE,PAGEWEAVE_STYLES} from './pageweave-package';
 import {shortTex,legacyTex,usesPageWeave} from './tex-names';
+import {readSubmission,submissionBodyRange,submissionExtra,submissionSource,submissionEngine,SUBMISSION_BODY,validateSubmission,type SubmissionConfig} from './submission';
 
 const sourceExtensions = new Set(['.tex', '.bib', '.sty', '.cls', '.txt', '.md', '.bst', '.cfg']);
 const excludedDirectories = new Set(['node_modules', '.git', '.tex-workbench', 'dist', 'dist-electron', 'release','recovery']);
@@ -77,6 +78,7 @@ export class Project {
     const candidates = [...p.files].filter(([file, data]) => /\.tex$/i.test(file) && /\\documentclass(?:\s|\[|\{)/.test(data.original ?? '')).map(([file]) => file);
     p.main = selectedMain??(candidates.includes('main.tex') ? 'main.tex' : candidates[0] ?? [...p.files.keys()].find(f => f.endsWith('.tex')) ?? '');
     if (!p.main) throw new Error('目录内没有 .tex 文件。请选择 LaTeX 工程目录。');
+    p.engine=readSubmission(p.history.texts.get(p.main)??'')?.engine??'xelatex';
     return p;
   }
   static async openFile(file:string){
@@ -92,6 +94,29 @@ export class Project {
     for(const style of styles){const full=contained(root,style.path),existing=await fs.lstat(full).catch(()=>null);if(existing&&(existing.isSymbolicLink()||!existing.isFile()||!(await fs.readFile(full)).equals(style.bytes)))throw new Error(`此目录已有不同的 ${style.path}，请选择其他存放目录。`);}
     for(const style of styles){const full=contained(root,style.path);try{await fs.writeFile(full,style.bytes,{flag:'wx'});}catch(error){if((error as NodeJS.ErrnoException).code!=='EEXIST'||!(await fs.readFile(full)).equals(style.bytes))throw error;}}
     await fs.writeFile(target,source,{flag:'wx'});return Project.openFile(target);
+  }
+  static async createSubmission(file:string,config:SubmissionConfig,resources:Record<string,Buffer>){
+    const root=await fs.realpath(path.dirname(file)),name=texFileName(path.basename(file)),target=contained(root,name);
+    if(await fs.stat(target).catch(()=>null))throw new Error('这个文件名已存在，请使用其他名称。');
+    const source=submissionSource(config,SUBMISSION_BODY);
+    for(const [name,bytes]of Object.entries(resources)){const existing=await fs.readFile(contained(root,name)).catch(error=>{if(error.code==='ENOENT')return null;throw error;});if(existing&&!existing.equals(bytes))throw new Error(`此目录已有不同的 ${name}，请选择独立文稿目录。`);}
+    for(const [name,bytes]of Object.entries(resources)){const target=contained(root,name);await fs.mkdir(path.dirname(target),{recursive:true});await fs.writeFile(target,bytes);}
+    await fs.writeFile(target,source,{flag:'wx'});return Project.openFile(target);
+  }
+  applySubmission(config:SubmissionConfig,resources:Record<string,Buffer>,version:number){
+    this.assertVersion(version);validateSubmission(config);
+    const state=this.state();if(!canFlow(state))throw new Error('请先新建模板文稿，再复制正文；当前源码包含独立的 LaTeX 结构。');
+    const source=this.history.texts.get(this.main)!,range=submissionBodyRange(source);
+    const body=range?source.slice(range.from,range.to):source.slice(source.indexOf('\\begin{document}')+16,source.lastIndexOf('\\end{document}'));
+    const next=submissionSource(config,shortTex(body),submissionExtra(source));
+    const added:[string,Buffer][]=[];
+    for(const [name,bytes]of Object.entries(resources)){
+      const existing=this.files.get(name);if(existing){if(!(existing.info.editable?Buffer.from(this.history.texts.get(name)!):existing.bytes).equals(bytes))throw new Error(`工程已有自定义 ${name}，请用模板新建文稿。`);}
+      else{const disk=contained(this.root,name);try{if(!readFileSync(disk).equals(bytes))throw new Error(`目录已有不同的 ${name}，请用模板新建文稿。`);}catch(error){if((error as NodeJS.ErrnoException).code!=='ENOENT')throw error;}added.push([name,bytes]);}
+    }
+    for(const [name,bytes]of added)this.addFile(name,bytes,'UTF-8',/\.(cls|sty|bst|cfg|def|txt)$/.test(name)?bytes.toString('utf8'):null);
+    if(this.history.commit('应用投稿模板',[minimalPatch(this.main,source,next)]))this.version++;
+    this.engine=config.engine;return this.state();
   }
   private async pendingDependencies(texts=this.history.texts){
     const added:[string,DiskFile][]=[];if(this.scope!=='file')return added;
@@ -162,6 +187,7 @@ export class Project {
   }
   pagePlan(plan:PagePlan,version:number){
     this.assertVersion(version);const state=this.state();
+    if(readSubmission(this.history.texts.get(this.main)??''))return state;
     if(!canFlow(state)||this.history.texts.get(LAYOUT_STYLE_FILE)!==LAYOUT_STYLE)return state;
     const doc=flowDocument(state.writing);
     if(plan.source!==serializeRich(doc)||JSON.stringify(plan.layout)!==JSON.stringify(paperLayout(state)))return state;
@@ -306,6 +332,7 @@ export class Project {
     const patches=[minimalPatch(file,before,text)];
     if(file===this.main&&review){const next=this.state();next.files=next.files.map(f=>f.path===file?{...f,content:text}:f);next.writing=parseWriting(text,file);if(canFlow(next)){const doc=flowDocument(next.writing);if(documentSource(review)!==documentSource(doc))patches.push(this.reviewPatch(relocateComments(review,doc)));}}
     if (this.history.commit(`编辑 ${file}`, patches)) this.version++;
+    if(file===this.main){const submission=readSubmission(text);if(submission)this.engine=submission.engine;}
     return this.state();
   }
   width(id: string, value: number, unit: string, version: number) {
@@ -316,11 +343,13 @@ export class Project {
     if (this.history.commit('调整图片宽度', [patch])) this.version++;
     return this.state();
   }
-  undo(version: number) { this.assertVersion(version); if (this.history.undo()) this.version++; return this.state(); }
-  redo(version: number) { this.assertVersion(version); if (this.history.redo()) this.version++; return this.state(); }
+  undo(version: number) { this.assertVersion(version); const wasSubmission=!!readSubmission(this.history.texts.get(this.main)??'');if (this.history.undo()) this.version++; const config=readSubmission(this.history.texts.get(this.main)??'');if(config||wasSubmission)this.engine=config?.engine??'xelatex';return this.state(); }
+  redo(version: number) { this.assertVersion(version); const wasSubmission=!!readSubmission(this.history.texts.get(this.main)??'');if (this.history.redo()) this.version++; const config=readSubmission(this.history.texts.get(this.main)??'');if(config||wasSubmission)this.engine=config?.engine??'xelatex';return this.state(); }
   configure(main: string, engine: Engine) {
     if (!this.files.has(main) || !/\.tex$/i.test(main)) throw new Error('请选择工程内的 .tex 入口。');
     if (!['xelatex', 'pdflatex', 'lualatex'].includes(engine)) throw new Error('不支持的编译器。');
+    const source=this.history.texts.get(main)??'',next=submissionEngine(source,engine);
+    if(source!==next){this.history.commit('更换编译器',[minimalPatch(main,source,next)]);this.version++;}
     if (this.main !== main || this.engine !== engine) { this.main = main; this.engine = engine; this.version++; }
     return this.state();
   }

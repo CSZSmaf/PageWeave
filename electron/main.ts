@@ -10,6 +10,10 @@ import {AiClient,AiSettings} from '../core/ai-client';
 import type { Engine,RecoveryInfo } from '../core/types';
 import {DEFAULT_DOCUMENT_NAME,documentFileName} from '../core/file-name';
 import {attachAutomation} from './automation-bridge';
+import {SubmissionLibrary} from '../core/submission-library';
+import {templateDefinition,type SubmissionConfig} from '../core/submission';
+import {randomUUID} from 'node:crypto';
+import {canFlow} from '../core/flow';
 
 const customData=process.env.PAGEWEAVE_USER_DATA??process.env.MOGAO_USER_DATA;
 if(customData)app.setPath('userData',path.resolve(customData));
@@ -65,6 +69,8 @@ app.whenReady().then(async () => {
   recovery=new RecoveryStore(path.join(dataRoot(),'recovery'));
   const aiSettings=new AiSettings(path.join(dataRoot(),'ai-config.json'),safeStorage),ai=new AiClient(aiSettings,(input,init)=>net.fetch(input instanceof URL?input.toString():input,init));
   const formulaCompiler=new FormulaCompiler(path.join(dataRoot(),'formula-builds'));
+  const submissions=new SubmissionLibrary(path.join(dataRoot(),'submission-templates'),(input,init)=>net.fetch(input instanceof URL?input.toString():input,init));
+  const submissionCompiler=new Compiler(path.join(dataRoot(),'submission-previews','builds'));
   preferences=new PreferenceStore(path.join(dataRoot(),'preferences.json'));
   const prefs = await preferences.read();
   const requested = process.argv.find(a => a.startsWith('--project='))?.slice('--project='.length);
@@ -128,6 +134,29 @@ app.whenReady().then(async () => {
   handler('project:demo', async () => { if (!await confirmLeave()) return null; return selectProject(await demoProject()); });
   handler('writing:demo',async()=>{if(!await confirmLeave())return null;return selectProject(await writingProject());});
   handler('writing:new',async()=>{if(!await confirmLeave())return null;const directory=path.join(app.getPath('documents'),'PageWeave');await fs.mkdir(directory,{recursive:true});const choice=await dialog.showSaveDialog(window,{title:'新建 LaTeX 文稿',defaultPath:path.join(directory,DEFAULT_DOCUMENT_NAME),buttonLabel:'创建',filters:[{name:'LaTeX 文稿',extensions:['tex']}]});if(choice.canceled||!choice.filePath)return null;return selectProject(await Project.createDocument(choice.filePath,path.join(app.getAppPath(),'examples','writing')));});
+  handler('submission:presets',()=>submissions.list());
+  handler('submission:save-preset',(name,config)=>submissions.save(name,config));
+  handler('submission:remove-preset',id=>submissions.remove(id));
+  handler('submission:website',id=>shell.openExternal(templateDefinition(id).url));
+  handler('submission:new',async(config:SubmissionConfig)=>{
+    if(!await confirmLeave())return null;
+    const directory=path.join(app.getPath('documents'),'PageWeave');await fs.mkdir(directory,{recursive:true});
+    const choice=await dialog.showSaveDialog(window,{title:'从投稿模板新建文稿',defaultPath:path.join(directory,config.template+'.tex'),buttonLabel:'创建',filters:[{name:'LaTeX 文稿',extensions:['tex']}]});
+    if(choice.canceled||!choice.filePath)return null;
+    return selectProject(await Project.createSubmission(choice.filePath,config,await submissions.resources(config)));
+  });
+  handler('submission:apply',async(config:SubmissionConfig,version:number)=>{
+    const current=project,resources=await submissions.resources(config);if(project!==current)throw new Error('当前文稿已切换，请重新打开投稿模板。');
+    const result=project.applySubmission(config,resources,version);await persist();return result;
+  });
+  handler('submission:preview',async(config:SubmissionConfig,current:boolean)=>{
+    const location=path.join(dataRoot(),'submission-previews','sources',randomUUID()),resources=await submissions.resources(config);let preview:Project;
+    try{
+      if(current&&canFlow(project.state())){await project.snapshot(location);preview=await Project.open(location,project.main);preview.applySubmission(config,resources,preview.version);}
+      else{await fs.mkdir(location,{recursive:true});preview=await Project.createSubmission(path.join(location,'preview.tex'),config,resources);}
+      const result=await submissionCompiler.compile(preview);await submissionCompiler.discard(result);return result;
+    }finally{await fs.rm(location,{recursive:true,force:true});}
+  });
   handler('writing:edit',(id,content,version)=>project.writeBlock(id,content,version));
   handler('writing:flow',(parts,version,document)=>project.writeFlow(parts,version,document));
   handler('writing:plan',(plan,version)=>project.pagePlan(plan,version));

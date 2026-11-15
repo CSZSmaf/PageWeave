@@ -28,7 +28,7 @@ function textLines(element:HTMLElement,node:PMNode,start:number):Unit[]{
         fragments.push({pos:base+low,top:rect.top,bottom:rect.bottom});
       }
     }else if(dom instanceof HTMLElement){
-      if(dom.matches('[data-math]')){const rect=dom.getBoundingClientRect();fragments.push({pos:position++,top:rect.top,bottom:rect.bottom});}
+      if(dom.matches('[data-math],[data-citation]')){const rect=dom.getBoundingClientRect();fragments.push({pos:position++,top:rect.top,bottom:rect.bottom});}
       else if(dom.tagName==='BR'){const r=dom.getBoundingClientRect();if(r.height)fragments.push({pos:position,top:r.top,bottom:r.bottom});if(!dom.classList.contains('ProseMirror-trailingBreak'))position++;}
       else for(const child of dom.childNodes)walk(child);
     }
@@ -47,7 +47,7 @@ function textLines(element:HTMLElement,node:PMNode,start:number):Unit[]{
 }
 
 function paginate(view:EditorView,layout:PaperLayout){
-  const mirror=document.createElement('div');mirror.className='page-writing-editor flow-measure';
+  const mirror=document.createElement('div');mirror.className='page-writing-editor flow-measure'+(layout.submission?' submission-measure':'');
   Object.assign(mirror.style,{position:'absolute',left:'-100000px',top:'0',width:`${layout.width-2*layout.margin}px`,visibility:'hidden',pointerEvents:'none'});
   mirror.contentEditable='false';
   mirror.style.setProperty('--image-max-height',`${(layout.height-2*layout.margin)*.82}px`);

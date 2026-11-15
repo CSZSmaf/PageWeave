@@ -20,6 +20,7 @@ import type {SearchController} from '../search/SearchController';
 import {WritingListItem,ListKeys} from './Lists';
 import {Review} from './Review';
 import {InlineMarks} from './InlineMarks';
+import {Citation} from './Citation';
 
 interface Props{content:RichNode;layout:PaperLayout;zoom:number;readOnly?:boolean;onReady(editor:Editor|null):void;onChange(doc:RichNode):void;onSelection():void;onPages(pages:number):void;onPlan?(plan:PagePlan):void;onMath(request:MathRequest):void;onDrawing(request:DrawingRequest):void;onComment?(id:string):void;onSearchReady(search:SearchController|null):void}
 const SourceId=Extension.create({name:'writingSourceId',addGlobalAttributes(){return [{types:['paragraph','heading','displayMath','pageBreak','flowImage','drawing','table','bulletList','orderedList'],attributes:{sourceId:{default:null,parseHTML:element=>element.getAttribute('data-block'),renderHTML:attrs=>attrs.sourceId?{'data-block':attrs.sourceId}:{}}}}];}});
@@ -29,7 +30,7 @@ export default function FlowEditor(props:Props){
   const [pages,setPages]=useState(1),compositionPending=useRef(false);
   const editor=useEditor({
     extensions:[StarterKit.configure({blockquote:false,listItem:false,code:false,codeBlock:false,horizontalRule:false,link:false,trailingNode:{node:'paragraph'},heading:{levels:[1,2,3]}}),WritingListItem,ListKeys,TextStyleKit.configure({lineHeight:false,backgroundColor:false}),TextAlign.configure({types:['heading','paragraph','flowImage','drawing'],defaultAlignment:'justify'}),BlockSpacing,SourceId,mathNode(false,r=>ref.current.onMath(r)),mathNode(true,r=>ref.current.onMath(r)),PageBreak,FlowImage,drawingNode(request=>ref.current.onDrawing(request)),AdvancedTable,AdvancedRow,AdvancedCell,AdvancedHeader,
-      ...InlineMarks,Review,WritingSearch,pagination(()=>ref.current.layout,n=>{setPages(n);ref.current.onPages(n);},plan=>ref.current.onPlan?.(plan)),
+      ...InlineMarks,Citation,Review,WritingSearch,pagination(()=>ref.current.layout,n=>{setPages(n);ref.current.onPages(n);},plan=>ref.current.onPlan?.(plan)),
       Extension.create({name:'continuousWritingKeys',priority:1000,addKeyboardShortcuts(){return {
         'Mod-Enter':()=>this.editor.isActive('table')||this.editor.isActive('listItem')||this.editor.commands.insertContent([{type:'pageBreak'},{type:'paragraph'}]),
         'Mod-End':()=>this.editor.chain().command(({tr})=>{tr.setSelection(Selection.atEnd(tr.doc));return true;}).scrollIntoView().run(),
@@ -48,9 +49,9 @@ export default function FlowEditor(props:Props){
   useEffect(()=>{props.onReady(editor);return()=>props.onReady(null);},[editor]);
   useEffect(()=>{editor?.setEditable(!props.readOnly,false);},[editor,props.readOnly]);
   useEffect(()=>{if(!editor)return;const search=writingSearch(editor),changed=()=>search.changed();ref.current.onSearchReady(search);editor.on('update',changed);return()=>{editor.off('update',changed);ref.current.onSearchReady(null);};},[editor]);
-  useEffect(()=>{if(editor)editor.view.dispatch(editor.state.tr.setMeta('paperLayout',true).setMeta('addToHistory',false));},[props.layout.width,props.layout.height,props.layout.margin,props.layout.fontSize,props.layout.fontFamily,props.layout.cjkFont,JSON.stringify(props.layout.furniture),editor]);
+  useEffect(()=>{if(editor)editor.view.dispatch(editor.state.tr.setMeta('paperLayout',true).setMeta('addToHistory',false));},[props.layout.width,props.layout.height,props.layout.margin,props.layout.fontSize,props.layout.fontFamily,props.layout.cjkFont,props.layout.submission,JSON.stringify(props.layout.furniture),editor]);
   const {width,height,margin}=props.layout,total=pages*(height+PAGE_GAP)-PAGE_GAP;
-  return <div className="flow-scroll"><div className="flow-scale" style={{zoom:props.zoom,width}}><div className="flow-document" data-pages={pages} style={{width,minHeight:total}} onMouseDown={event=>{
+  return <div className={"flow-scroll"+(props.layout.submission?" submission-document":"")}><div className="flow-scale" style={{zoom:props.zoom,width}}><div className="flow-document" data-pages={pages} style={{width,minHeight:total}} onMouseDown={event=>{
     if(event.target===event.currentTarget||((event.target as HTMLElement).classList.contains('flow-sheet'))){event.preventDefault();editor?.commands.focus('end');}
   }}>
     <div className="flow-sheets" aria-hidden="true">{Array.from({length:pages},(_,i)=><div key={i} className="flow-sheet" data-page={i+1} style={{top:i*(height+PAGE_GAP),width,height}}>{props.layout.furniture?(!props.layout.furniture.hideFirst||i>0)&&(['header','footer'] as const).map(kind=>{const f=props.layout.furniture!,single=f[kind].filter(Boolean).length===1;return <div key={kind} className={`flow-furniture ${kind} ${f[kind==='header'?'headerLine':'footerLine']?'with-line':''} ${single?'single':''}`} style={{left:margin,width:width-2*margin,fontSize:f.fontSize+'pt',color:f.color,top:kind==='header'?margin-(f.fontSize*1.4+6)*96/72:height-margin+6}}>{f[kind].map((text,index)=><span key={index} style={single&&text?{position:'absolute',width:'100%',textAlign:index===0?'left':index===1?'center':'right'}:undefined}>{furnitureText(text,i+1,pages)}</span>)}</div>}):<span className="flow-folio">{i+1}</span>}</div>)}</div>

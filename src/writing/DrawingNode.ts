@@ -1,18 +1,8 @@
 import {Node} from '@tiptap/core';
-import {validateDiagram,edgePoints,arrowPoints,shapeLines,type Diagram} from '../../core/drawing';
+import {validateDiagram,type Diagram} from '../../core/drawing';
+import {diagramSvgContent} from './DrawingSvg';
+export {diagramSvgContent} from './DrawingSvg';
 export interface DrawingRequest {drawing:Diagram;commit(value:Diagram):void}
-const xml=(text:string)=>text.replace(/[&<>"']/g,char=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&apos;'}[char]!));
-const xy=(p:{x:number;y:number})=>`${p.x},${p.y}`;
-export function diagramSvgContent(value:Diagram){
-  const d=validateDiagram(value),result:string[]=[];
-  for(const e of d.edges){const points=edgePoints(d,e),middle=points[Math.floor((points.length-1)/2)],next=points[Math.ceil((points.length-1)/2)];result.push(`<g data-edge="${e.id}"><polyline points="${points.map(xy).join(' ')}" fill="none" stroke="${e.color}" stroke-width="2" ${e.dashed?'stroke-dasharray="7 5"':''}/><polyline class="edge-hit" points="${points.map(xy).join(' ')}" fill="none" stroke="transparent" stroke-width="14"/><polygon points="${arrowPoints(points).map(xy).join(' ')}" fill="${e.color}"/>${e.label?`<text x="${(middle.x+next.x)/2}" y="${(middle.y+next.y)/2}" dy=".35em" text-anchor="middle" font-size="14" fill="${e.color}" stroke="white" stroke-width="4" paint-order="stroke">${xml(e.label)}</text>`:''}</g>`);}
-  for(const n of d.nodes){const style=`fill="${n.fill}" stroke="${n.stroke}" stroke-width="2"`;let shape='';
-    if(n.kind==='ellipse')shape=`<ellipse cx="${n.x+n.width/2}" cy="${n.y+n.height/2}" rx="${n.width/2}" ry="${n.height/2}" ${style}/>`;
-    else if(n.kind==='diamond')shape=`<polygon points="${n.x+n.width/2},${n.y} ${n.x+n.width},${n.y+n.height/2} ${n.x+n.width/2},${n.y+n.height} ${n.x},${n.y+n.height/2}" ${style}/>`;
-    else shape=`<rect x="${n.x}" y="${n.y}" width="${n.width}" height="${n.height}" rx="${n.kind==='rounded'?9:0}" ${style}/>`;
-    const lines=shapeLines(n);result.push(`<g data-node="${n.id}" aria-label="${xml(n.text||'图形')}">${shape}<text text-anchor="middle" font-size="${n.fontSize}" fill="${n.color}">${lines.map((line,i)=>`<tspan x="${n.x+n.width/2}" y="${n.y+n.height/2+(i-(lines.length-1)/2)*n.fontSize*1.25}" dy=".35em">${xml(line)}</tspan>`).join('')}</text></g>`);
-  }return result.join('');
-}
 export function drawingNode(onEdit:(request:DrawingRequest)=>void){return Node.create({
   name:'drawing',group:'block',atom:true,draggable:false,
   addAttributes(){return {drawing:{default:null},width:{default:90},textAlign:{default:'center'}};},
